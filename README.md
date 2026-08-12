@@ -1,75 +1,25 @@
-# TouchPointScripts
+# TouchPoint Development - RockPointe Church
 
-Python scripts, SQL queries, and automation tools for [TouchPoint ChMS](https://www.touchpointsoftware.com/). Helping churches leverage their data for ministry.
+Local development environment for TouchPoint scripts and automation.
 
-## 🙏 About This Project
+## Projects
 
-This is a collection of scripts I'm developing as a volunteer to help churches get more out of their TouchPoint church management system. Scripts are shared freely for other churches to use and adapt.
+| Directory | Description |
+|-----------|-------------|
+| `outstanding-task-notifications/` | SM staff outstanding task email notification system |
+| `attendance-dashboard/` | Attendance reporting dashboard |
 
-**Inspired by:** [TenthPres/TouchPointScripts](https://github.com/TenthPres/TouchPointScripts) - huge thanks to their team for sharing their work!
+## Quick Start
 
-## 📁 Current Scripts
-
-### Student Ministry Task Notifications
-Automated email reminders for ministry staff about incomplete tasks.
-
-| File | Type | Description |
-|------|------|-------------|
-| `SM_TaskNote-ToDo.sql` | SQL | Identifies users with outstanding tasks |
-| `SM_OutstandingTasksList.py` | Python | Generates formatted HTML task list |
-| `SM_OutstandingTaskNotifications.py` | Python | Sends reminder emails |
-| `SM_OutstandingTasksReminderEmail.md` | Template | Email body content |
-
-## 🚀 Deployment
-
-### Prerequisites
-- TouchPoint account with **Developer** and **SpecialContentFull** roles
-- Access to Admin > Advanced > Special Content
-
-### Installation Order
-1. **SQL Script:** Admin > Special Content > SQL Scripts > +New
-   - Name: `SM_TaskNote-ToDo`
-
-2. **Python Script:** Admin > Special Content > Python Scripts > +New
-   - Name: `SM_OutstandingTasksList`
-
-3. **Email Template:** Admin > Emails > Saved Drafts
-   - Name: `SM_OutstandingTasksReminder`
-   - Include `{pythonscript:SM_OutstandingTasksList}` in body
-
-4. **Python Script:** Admin > Special Content > Python Scripts > +New
-   - Name: `SM_OutstandingTaskNotifications`
-
-### Configuration Required
-Edit `SM_OutstandingTaskNotifications.py` before deploying:
-```python
-FROM_EMAIL = "your-ministry@yourchurch.org"
-FROM_NAME = "Your Church Ministry"
-QUEUED_BY_ID = 0  # Get from TouchPoint admin
+### Outstanding Task Notifications
+```bash
+cd outstanding-task-notifications
+./automation/deploy_scripts.sh status
+./automation/deploy_scripts.sh validate
 ```
 
-### Scheduling
-Add to your `MorningBatch` or `ScheduledTasks` script:
-```python
-# Send every Tuesday morning
-if model.DayOfWeek == 2:
-    model.CallScript('SM_OutstandingTaskNotifications')
+### API Testing
+```bash
+cd outstanding-task-notifications/api_test
+python3 tp_api_test.py
 ```
-
-## 📚 Resources
-
-- [TouchPoint Python Documentation](https://docs.touchpointsoftware.com/CustomProgramming/Python/index.html)
-- [TouchPoint Special Content](https://docs.touchpointsoftware.com/Administration/Display_Index.html)
-- [TenthPres Scripts](https://github.com/TenthPres/TouchPointScripts) - More examples!
-
-## 🤝 Contributing
-
-Found a bug? Have an improvement? PRs welcome! This is a volunteer project aimed at helping churches.
-
-## 📄 License
-
-MIT License - Use freely, modify as needed, share with other churches!
-
----
-
-*Built with ❤️ for the local church*

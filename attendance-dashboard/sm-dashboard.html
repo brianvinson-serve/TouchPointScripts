@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SM Attendance Dashboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#f0f4f8;color:#1a202c;font-size:13px;line-height:1.5}
+
+/* ---- Top bar ---- */
+.topbar{background:#1a365d;color:white;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.topbar h1{font-size:15px;font-weight:700;letter-spacing:.3px}
+.topbar-right{display:flex;gap:8px;align-items:center}
+.topbar small{color:rgba(255,255,255,.55);font-size:11px;margin-left:12px}
+
+/* ---- Buttons ---- */
+.btn{padding:5px 13px;border-radius:5px;border:none;cursor:pointer;font-size:12px;font-weight:600;transition:background .15s}
+.btn-ghost{background:rgba(255,255,255,.12);color:white}
+.btn-ghost:hover{background:rgba(255,255,255,.22)}
+.btn-ghost:disabled{opacity:.35;cursor:default}
+
+/* ---- Upload ---- */
+.upload-section{padding:48px 24px;text-align:center}
+.upload-box{border:2px dashed #a0aec0;border-radius:12px;padding:48px 32px;max-width:500px;margin:0 auto;background:white;cursor:pointer;transition:border-color .2s,box-shadow .2s}
+.upload-box:hover{border-color:#3182ce;box-shadow:0 0 0 4px rgba(49,130,206,.1)}
+.upload-icon{font-size:44px;margin-bottom:14px}
+.upload-box h2{font-size:16px;color:#2d3748;margin-bottom:6px}
+.upload-box p{color:#718096;font-size:12px;max-width:340px;margin:0 auto}
+.upload-hint{margin-top:16px;color:#a0aec0;font-size:11px;font-family:monospace;word-break:break-all}
+input[type="file"]{display:none}
+
+/* ---- Filters ---- */
+.filters{background:white;border-bottom:1px solid #e2e8f0;padding:10px 24px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;position:sticky;top:45px;z-index:90;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.filter-group{display:flex;align-items:center;gap:6px}
+.filter-label{font-size:10px;font-weight:700;color:#a0aec0;text-transform:uppercase;letter-spacing:.6px;white-space:nowrap}
+.btn-group{display:flex;border-radius:5px;overflow:hidden;border:1px solid #e2e8f0}
+.btn-toggle{padding:4px 10px;border:none;background:white;color:#4a5568;font-size:11px;font-weight:500;cursor:pointer;border-right:1px solid #e2e8f0;transition:background .12s,color .12s;white-space:nowrap}
+.btn-toggle:last-child{border-right:none}
+.btn-toggle.active{background:#2b6cb0;color:white;font-weight:700}
+.btn-toggle:hover:not(.active):not(:disabled){background:#ebf8ff}
+.btn-toggle:disabled{color:#cbd5e0;cursor:default}
+.date-row{display:flex;gap:6px;align-items:center}
+.date-row input[type="date"]{padding:3px 7px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px;color:#2d3748}
+.date-sep{color:#a0aec0;font-size:11px}
+
+/* ---- Stats bar ---- */
+.stats-bar{display:flex;gap:24px;padding:9px 24px;background:#ebf8ff;border-bottom:1px solid #bee3f8;flex-wrap:wrap;align-items:center}
+.stat{display:flex;flex-direction:column}
+.stat-val{font-size:19px;font-weight:800;color:#2b6cb0;line-height:1.1}
+.stat-lbl{font-size:10px;color:#4a5568;text-transform:uppercase;letter-spacing:.4px;margin-top:1px}
+.stat-range{font-size:12px;font-weight:600;color:#2b6cb0}
+
+/* ---- Table ---- */
+.table-section{padding:16px 24px}
+.table-wrapper{overflow-x:auto;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+table{border-collapse:collapse;width:100%;background:white}
+
+thead th{background:#1a365d;color:white;padding:7px 10px;font-size:11px;font-weight:600;text-align:right;white-space:nowrap}
+thead th.col-label{text-align:left;min-width:210px;background:#12263f}
+thead th.col-total{background:#163155}
+thead th.col-avg{background:#163155;color:rgba(255,255,255,.75)}
+
+td{padding:4px 10px;border-bottom:1px solid #edf2f7;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+td.col-label{text-align:left}
+td.col-total{font-weight:600}
+td.col-avg{color:#718096}
+.zero{color:#e2e8f0}
+
+/* Row types */
+tr.r-campus td{background:#dbeafe;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid #bfdbfe}
+tr.r-campus td.col-label{padding-left:12px}
+
+tr.r-school td{background:#f0fdf4;font-weight:600;border-bottom:1px solid #dcfce7}
+tr.r-school td.col-label{padding-left:20px}
+
+tr.r-detail td{background:white}
+tr.r-detail td.col-label{padding-left:36px;color:#2d3748}
+
+tr.r-offhour td{background:#fafafa}
+tr.r-offhour td.col-label{padding-left:36px;color:#718096;font-style:italic}
+
+tr.r-subtotal td{background:#dbeafe;font-weight:600;border-top:1px solid #bfdbfe;border-bottom:1px solid #bfdbfe}
+tr.r-subtotal td.col-label{padding-left:20px}
+
+tr.r-campus-total td{background:#bfdbfe;font-weight:700;border-top:2px solid #93c5fd;border-bottom:2px solid #93c5fd}
+tr.r-campus-total td.col-label{padding-left:12px}
+
+tr.r-vol-header td{background:#fffbeb;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-top:4px solid #e2e8f0;border-bottom:1px solid #fde68a}
+tr.r-vol-campus td{background:#fefce8;font-weight:600}
+tr.r-vol-campus td.col-label{padding-left:20px}
+tr.r-vol-detail td{background:white}
+tr.r-vol-detail td.col-label{padding-left:36px}
+tr.r-vol-subtotal td{background:#fef9c3;font-weight:600}
+tr.r-vol-subtotal td.col-label{padding-left:20px}
+
+tr.r-grand td{background:#1a365d;color:white;font-weight:700;font-size:13px;padding:8px 10px;border-top:2px solid #2b6cb0}
+tr.r-grand td.col-avg{color:rgba(255,255,255,.65)}
+
+tr.r-spacer td{height:6px;background:#f0f4f8;border:none}
+
+/* Empty state */
+.empty-state{padding:60px;text-align:center;color:#a0aec0;background:white}
+.empty-state p{margin-top:8px;font-size:12px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div>
+    <h1>Student Ministry Attendance</h1>
+    <small id="topbarSub"></small>
+  </div>
+  <div class="topbar-right">
+    <button class="btn btn-ghost" onclick="triggerUpload()">Load CSV</button>
+    <button class="btn btn-ghost" id="exportBtn" onclick="exportCSV()" style="display:none">Export CSV</button>
+  </div>
+</div>
+
+<!-- Upload screen -->
+<div id="uploadSection" class="upload-section">
+  <label class="upload-box" for="csvInput">
+    <div class="upload-icon">📊</div>
+    <h2>Load attendance export</h2>
+    <p>Run the SM Attendance Flat query in TouchPoint, download as Excel, save as CSV, then drop it here.</p>
+    <div class="upload-hint">Expected columns: Campus, PersonType, SchoolLevel, Grade, GradeOrder, Gender, DayOfWeek, MeetingDate, OrganizationId, OrganizationName, Category, Attendance</div>
+  </label>
+  <input type="file" id="csvInput" accept=".csv,.txt" onchange="handleFile(event)">
+</div>
+
+<!-- Dashboard -->
+<div id="dashboard" style="display:none">
+
+  <div class="filters">
+    <div class="filter-group">
+      <span class="filter-label">Campus</span>
+      <div class="btn-group">
+        <button class="btn-toggle active" onclick="setFilter('campus','all',this)">All</button>
+        <button class="btn-toggle" onclick="setFilter('campus','Central',this)">Central</button>
+        <button class="btn-toggle" onclick="setFilter('campus','Parker Square',this)">Parker Square</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Type</span>
+      <div class="btn-group">
+        <button class="btn-toggle active" onclick="setFilter('personType','Students',this)">Students</button>
+        <button class="btn-toggle" onclick="setFilter('personType','Volunteers',this)">Volunteers</button>
+        <button class="btn-toggle" onclick="setFilter('personType','all',this)">Both</button>
+      </div>
+    </div>
+    <div class="filter-group" id="schoolGroup">
+      <span class="filter-label">School</span>
+      <div class="btn-group" id="schoolBtns">
+        <button class="btn-toggle active" onclick="setFilter('schoolLevel','all',this)">All</button>
+        <button class="btn-toggle" onclick="setFilter('schoolLevel','Middle School',this)">Middle</button>
+        <button class="btn-toggle" onclick="setFilter('schoolLevel','High School',this)">High School</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Day</span>
+      <div class="btn-group">
+        <button class="btn-toggle active" onclick="setFilter('dayOfWeek','all',this)">All</button>
+        <button class="btn-toggle" onclick="setFilter('dayOfWeek','Sunday',this)">Sunday</button>
+        <button class="btn-toggle" onclick="setFilter('dayOfWeek','Wednesday',this)">Wednesday</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Range</span>
+      <div class="btn-group" id="presetBtns">
+        <button class="btn-toggle" onclick="setPreset(4,this)">4 wk</button>
+        <button class="btn-toggle" onclick="setPreset(8,this)">8 wk</button>
+        <button class="btn-toggle" onclick="setPreset(13,this)">13 wk</button>
+        <button class="btn-toggle active" onclick="setPreset('all',this)">All</button>
+      </div>
+      <div class="date-row">
+        <input type="date" id="startDate" onchange="onCustomDate()">
+        <span class="date-sep">to</span>
+        <input type="date" id="endDate" onchange="onCustomDate()">
+      </div>
+    </div>
+  </div>
+
+  <div class="stats-bar" id="statsBar"></div>
+
+  <div class="table-section">
+    <div class="table-wrapper">
+      <table>
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ============================================================
+// State
+// ============================================================
+let rawData = [];
+const S = {
+  campus: 'all',
+  personType: 'Students',
+  schoolLevel: 'all',
+  dayOfWeek: 'all',
+  startDate: null,
+  endDate: null,
+};
+
+// ============================================================
+// File handling
+// ============================================================
+function triggerUpload() { document.getElementById('csvInput').click(); }
+
+function handleFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = evt => {
+    const parsed = parseCSV(evt.target.result);
+    if (!parsed.length) { alert('No rows found. Make sure the file is a CSV with a header row.'); return; }
+    rawData = parsed;
+
+    const dates = allDates(rawData);
+    document.getElementById('startDate').value = dates[0] || '';
+    document.getElementById('endDate').value = dates[dates.length - 1] || '';
+
+    document.getElementById('uploadSection').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+    document.getElementById('exportBtn').style.display = '';
+    document.getElementById('topbarSub').textContent = file.name;
+
+    render();
+  };
+  reader.readAsText(file);
+}
+
+// ============================================================
+// CSV parser
+// ============================================================
+function parseCSV(text) {
+  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n');
+  if (lines.length < 2) return [];
+  const headers = parseLine(lines[0]).map(h => h.trim());
+  return lines.slice(1).filter(l => l.trim()).map(line => {
+    const vals = parseLine(line);
+    const row = {};
+    headers.forEach((h,i) => row[h] = (vals[i]||'').trim());
+    return norm(row);
+  }).filter(r => r.MeetingDate);
+}
+
+function parseLine(line) {
+  const out=[]; let cur='',q=false;
+  for (let i=0;i<line.length;i++){
+    const c=line[i];
+    if (c==='"'){q=!q;}
+    else if(c===','&&!q){out.push(cur);cur='';}
+    else cur+=c;
+  }
+  out.push(cur); return out;
+}
+
+function norm(row) {
+  let d = row.MeetingDate||'';
+  // M/D/YYYY or MM/DD/YYYY (with optional time)
+  const slash = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (slash) d = `${slash[3]}-${slash[1].padStart(2,'0')}-${slash[2].padStart(2,'0')}`;
+  // YYYY-MM-DD already fine; strip any time suffix
+  d = d.replace(/[T\s].*$/,'').trim();
+  // Excel serial number fallback
+  if (/^\d+$/.test(d)) {
+    const n=parseInt(d);
+    if(n>40000){const dt=new Date((n-25569)*86400000);d=dt.toISOString().slice(0,10);}
+    else d='';
+  }
+  return {
+    ...row,
+    MeetingDate: d,
+    Attendance: parseInt(row.Attendance)||0,
+    GradeOrder: parseInt(row.GradeOrder)||99,
+    Grade: row.Grade||'',
+    Gender: row.Gender||'',
+    Category: row.Category||'Sunday',
+  };
+}
+
+// ============================================================
+// Filters
+// ============================================================
+function setFilter(key, val, btn) {
+  S[key]=val;
+  btn.closest('.btn-group').querySelectorAll('.btn-toggle').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  // Disable school filter when viewing Volunteers only
+  if (key==='personType') {
+    const btns = document.querySelectorAll('#schoolBtns .btn-toggle');
+    if (val==='Volunteers'){
+      btns.forEach(b=>{b.disabled=true;b.classList.remove('active');});
+      btns[0].classList.add('active');
+      S.schoolLevel='all';
+    } else {
+      btns.forEach(b=>b.disabled=false);
+    }
+  }
+  render();
+}
+
+function setPreset(weeks, btn) {
+  btn.closest('.btn-group').querySelectorAll('.btn-toggle').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  const dates=allDates(rawData);
+  if(!dates.length)return;
+  const end=dates[dates.length-1];
+  const start=weeks==='all'?dates[0]:dates[Math.max(0,dates.length-weeks)];
+  document.getElementById('startDate').value=start;
+  document.getElementById('endDate').value=end;
+  render();
+}
+
+function onCustomDate() {
+  document.querySelectorAll('#presetBtns .btn-toggle').forEach(b=>b.classList.remove('active'));
+  render();
+}
+
+function filtered() {
+  const s=document.getElementById('startDate').value;
+  const e=document.getElementById('endDate').value;
+  return rawData.filter(r=>{
+    if(S.campus!=='all'&&r.Campus!==S.campus)return false;
+    if(S.personType!=='all'&&r.PersonType!==S.personType)return false;
+    if(S.schoolLevel!=='all'&&r.PersonType==='Students'&&r.SchoolLevel!==S.schoolLevel)return false;
+    if(S.dayOfWeek!=='all'&&r.DayOfWeek!==S.dayOfWeek)return false;
+    if(s&&r.MeetingDate<s)return false;
+    if(e&&r.MeetingDate>e)return false;
+    return true;
+  });
+}
+
+// ============================================================
+// Render
+// ============================================================
+function render() {
+  const data=filtered();
+  const dates=allDates(data);
+  renderStats(data,dates);
+  renderTable(data,dates);
+}
+
+// ---- Stats bar ----
+function avgByDate(rows) {
+  const byDate={};
+  rows.forEach(r=>{byDate[r.MeetingDate]=(byDate[r.MeetingDate]||0)+r.Attendance;});
+  const totals=Object.values(byDate);
+  return {avg:totals.length?Math.round(totals.reduce((s,v)=>s+v,0)/totals.length):0, peak:totals.length?Math.max(...totals):0};
+}
+
+function renderStats(data,dates) {
+  const s=dates[0],e=dates[dates.length-1];
+  const showSun = S.dayOfWeek==='all'||S.dayOfWeek==='Sunday';
+  const showWed = S.dayOfWeek==='all'||S.dayOfWeek==='Wednesday';
+  const sunStudents = data.filter(r=>r.PersonType==='Students'&&r.Category==='Sunday');
+  const dgStudents  = data.filter(r=>r.PersonType==='Students'&&r.Category==='D-Groups');
+  const sun = avgByDate(sunStudents);
+  const dg  = avgByDate(dgStudents);
+  const totalVisits = data.filter(r=>r.PersonType==='Students').reduce((s,r)=>s+r.Attendance,0);
+
+  let html=`
+    <div class="stat"><span class="stat-val">${dates.length}</span><span class="stat-lbl">dates loaded</span></div>
+    <div class="stat"><span class="stat-range">${fmt(s)} - ${fmt(e)}</span><span class="stat-lbl">date range</span></div>`;
+  if(showSun&&sunStudents.length)
+    html+=`<div class="stat"><span class="stat-val">${sun.avg}</span><span class="stat-lbl">Sunday avg</span></div>
+           <div class="stat"><span class="stat-val">${sun.peak}</span><span class="stat-lbl">Sunday peak</span></div>`;
+  if(showWed&&dgStudents.length)
+    html+=`<div class="stat"><span class="stat-val">${dg.avg}</span><span class="stat-lbl">D-Group avg</span></div>
+           <div class="stat"><span class="stat-val">${dg.peak}</span><span class="stat-lbl">D-Group peak</span></div>`;
+  html+=`<div class="stat"><span class="stat-val">${totalVisits.toLocaleString()}</span><span class="stat-lbl">total student visits</span></div>`;
+  document.getElementById('statsBar').innerHTML=html;
+}
+
+// ---- Pivot table ----
+function renderTable(data,dates) {
+  if(!dates.length){
+    document.getElementById('thead').innerHTML='';
+    document.getElementById('tbody').innerHTML='<tr><td colspan="5" class="empty-state">No data matches the current filters.</td></tr>';
+    return;
+  }
+
+  const n=dates.length;
+  const thDates=dates.map(d=>`<th>${fmt(d)}</th>`).join('');
+  document.getElementById('thead').innerHTML=`
+    <tr>
+      <th class="col-label">Row</th>
+      ${thDates}
+      <th class="col-total">Total</th>
+      <th class="col-avg">${n}wk Avg</th>
+    </tr>`;
+
+  const rows=buildRows(data,dates,n);
+  document.getElementById('tbody').innerHTML=rows.map(r=>{
+    if(r.type==='spacer') return `<tr class="r-spacer"><td colspan="${dates.length+3}"></td></tr>`;
+    const cells=dates.map(d=>{
+      const v=r.byDate[d]||0;
+      return `<td>${v===0?'<span class="zero">-</span>':v}</td>`;
+    }).join('');
+    return `<tr class="r-${r.type}">
+      <td class="col-label">${r.label}</td>
+      ${cells}
+      <td class="col-total col-label-cell">${r.total||0}</td>
+      <td class="col-avg">${r.avg||0}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ---- Row builder ----
+function buildRows(data,dates,n) {
+  const rows=[];
+  const campuses=[...new Set(data.map(r=>r.Campus))].filter(Boolean).sort();
+  const showS=S.personType==='Students'||S.personType==='all';
+  const showV=S.personType==='Volunteers'||S.personType==='all';
+  const showSun=S.dayOfWeek==='all'||S.dayOfWeek==='Sunday';
+  const showWed=S.dayOfWeek==='all'||S.dayOfWeek==='Wednesday';
+
+  // --- Sunday grade pivot ---
+  if(showS&&showSun){
+    const sd=data.filter(r=>r.PersonType==='Students'&&r.Category==='Sunday');
+    const sunCampuses=[...new Set(sd.map(r=>r.Campus))].filter(Boolean).sort();
+    for(const campus of sunCampuses){
+      const cd=sd.filter(r=>r.Campus===campus);
+      if(!cd.length)continue;
+      rows.push(mk('campus',campus,cd,dates,n));
+      for(const sl of['Middle School','High School']){
+        if(S.schoolLevel!=='all'&&S.schoolLevel!==sl)continue;
+        const sld=cd.filter(r=>r.SchoolLevel===sl);
+        if(!sld.length)continue;
+        rows.push(mk('school',sl,sld,dates,n));
+        for(const[grade,gender]of gradeCombos(sld)){
+          const dd=sld.filter(r=>r.Grade===grade&&r.Gender===gender);
+          if(!dd.length)continue;
+          const label=gender?`${grade} ${gender}`:grade;
+          rows.push(mk('detail',label,dd,dates,n));
+        }
+        rows.push(mk('subtotal',`${sl} Total`,sld,dates,n));
+      }
+      if(S.schoolLevel==='all'){
+        const od=cd.filter(r=>r.SchoolLevel==='Other'||(r.PersonType==='Students'&&!r.SchoolLevel));
+        if(od.length){
+          const orgs=[...new Set(od.map(r=>r.OrganizationName))].sort();
+          for(const org of orgs){
+            rows.push(mk('offhour',shortName(org),od.filter(r=>r.OrganizationName===org),dates,n));
+          }
+        }
+      }
+      rows.push(mk('campus-total',`${campus} Students`,cd,dates,n));
+    }
+    if(sunCampuses.length>1&&S.campus==='all'){
+      rows.push(mk('grand','Grand Total (Students)',sd,dates,n));
+    }
+  }
+
+  // --- D-Groups section (Wednesday) ---
+  if(showS&&showWed){
+    const dg=data.filter(r=>r.PersonType==='Students'&&r.Category==='D-Groups');
+    if(dg.length){
+      if(rows.length)rows.push({type:'spacer'});
+      rows.push(mk('vol-header','D-Groups',dg,dates,n));
+      const dgCampuses=[...new Set(dg.map(r=>r.Campus))].filter(Boolean).sort();
+      for(const campus of dgCampuses){
+        const cd=dg.filter(r=>r.Campus===campus);
+        if(!cd.length)continue;
+        rows.push(mk('vol-campus',campus,cd,dates,n));
+        const orgs=[...new Set(cd.map(r=>r.OrganizationName))].sort();
+        for(const org of orgs){
+          rows.push(mk('vol-detail',shortName(org),cd.filter(r=>r.OrganizationName===org),dates,n));
+        }
+        rows.push(mk('vol-subtotal',`${campus} Total`,cd,dates,n));
+      }
+      if(dgCampuses.length>1&&S.campus==='all'){
+        rows.push(mk('grand','D-Groups Total',dg,dates,n));
+      }
+    }
+  }
+
+  // --- Volunteers ---
+  if(showV){
+    const vd=data.filter(r=>r.PersonType==='Volunteers');
+    if(vd.length){
+      rows.push({type:'spacer'});
+      rows.push(mk('vol-header','Volunteers',vd,dates,n));
+      for(const campus of campuses){
+        const cvd=vd.filter(r=>r.Campus===campus);
+        if(!cvd.length)continue;
+        rows.push(mk('vol-campus',campus,cvd,dates,n));
+        const orgs=[...new Set(cvd.map(r=>r.OrganizationName))].sort();
+        for(const org of orgs){
+          rows.push(mk('vol-detail',shortName(org),cvd.filter(r=>r.OrganizationName===org),dates,n));
+        }
+        rows.push(mk('vol-subtotal',`${campus} Total`,cvd,dates,n));
+      }
+      if(campuses.length>1&&S.campus==='all'){
+        rows.push(mk('grand','Volunteer Total',vd,dates,n));
+      }
+    }
+  }
+
+  return rows;
+}
+
+function mk(type,label,data,dates,n){
+  const byDate={};
+  dates.forEach(d=>{byDate[d]=data.filter(r=>r.MeetingDate===d).reduce((s,r)=>s+r.Attendance,0);});
+  const total=Object.values(byDate).reduce((s,v)=>s+v,0);
+  const avg=n>0?Math.round(total/n):0;
+  return{type,label,byDate,total,avg};
+}
+
+// ============================================================
+// Helpers
+// ============================================================
+function allDates(data){
+  return[...new Set(data.map(r=>r.MeetingDate))].filter(Boolean).sort();
+}
+
+function gradeCombos(data){
+  const seen=new Map();
+  data.forEach(r=>{
+    const k=`${r.GradeOrder}|${r.Grade}|${r.Gender}`;
+    if(!seen.has(k))seen.set(k,[r.GradeOrder,r.Grade,r.Gender]);
+  });
+  return[...seen.values()]
+    .sort((a,b)=>a[0]-b[0]||a[2].localeCompare(b[2]))
+    .map(v=>[v[1],v[2]]);
+}
+
+function fmt(dateStr){
+  if(!dateStr)return'';
+  const[y,m,d]=dateStr.split('-').map(Number);
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return`${months[m-1]} ${d}`;
+}
+
+function shortName(org){
+  return org.replace(/^SM: (CC|PS) /,'');
+}
+
+// ============================================================
+// Export
+// ============================================================
+function exportCSV(){
+  const data=filtered();
+  const cols=['Campus','PersonType','SchoolLevel','Grade','Gender','DayOfWeek','MeetingDate','OrganizationName','Attendance'];
+  const csv=[
+    cols.join(','),
+    ...data.map(r=>cols.map(c=>JSON.stringify(r[c]??'')).join(','))
+  ].join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=`sm-attendance-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+</script>
+</body>
+</html>
