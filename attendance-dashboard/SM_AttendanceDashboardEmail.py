@@ -4,7 +4,7 @@
 # - Sends a mobile-friendly report each Monday for the immediately preceding Sunday.
 # - Compares headline and campus totals with the Sunday before that.
 # - Lists current-Sunday student attendance by campus and leader attendance from
-#   SM: All Volunteers 2026-2027.
+#   the three confirmed 2026-2027 Sunday volunteer/leader organizations.
 # - Flags active Sunday attendance organizations with no meeting row for the report date.
 #
 # DEPLOYMENT: Admin > Advanced > Special Content > Python Scripts
@@ -62,7 +62,11 @@ SUNDAY_DIVISION_ID = 11
 STUDENT_TYPE_ID = 201
 VOLUNTEER_TYPE_ID = 207
 ORGANIZATION_STATUS_ACTIVE = 30
-LEADER_ATTENDANCE_ORG_NAME = "SM: All Volunteers 2026-2027"
+LEADER_ATTENDANCE_ORG_NAMES = [
+    "SM: CC Sunday Morning Volunteers 2026-2027",
+    "SM: PS Sunday Morning Volunteers 2026-2027",
+    "SM: PS D Group Leaders 2026-2027",
+]
 
 # ============================================================
 # DATE PARAMETERS
@@ -98,11 +102,14 @@ DECLARE @ReportDate      DATE = '{report_date}'
 DECLARE @ComparisonDate  DATE = '{comparison_date}'
 DECLARE @CCPrefix        VARCHAR(10) = 'SM: CC '
 DECLARE @PSPrefix        VARCHAR(10) = 'SM: PS '
-DECLARE @LeaderOrgName   VARCHAR(100) = '{leader_org_name}'
+DECLARE @CCLeaderOrgName VARCHAR(100) = '{cc_leader_org_name}'
+DECLARE @PSLeaderOrgName VARCHAR(100) = '{ps_leader_org_name}'
+DECLARE @PSDGroupOrgName VARCHAR(100) = '{ps_dgroup_org_name}'
 
 SELECT
     Campus = CASE
-        WHEN o.OrganizationName = @LeaderOrgName THEN 'All Campuses'
+        WHEN o.OrganizationName = @CCLeaderOrgName THEN 'Central'
+        WHEN o.OrganizationName IN (@PSLeaderOrgName, @PSDGroupOrgName) THEN 'Parker Square'
         WHEN o.OrganizationName LIKE @CCPrefix + '%' THEN 'Central'
         WHEN o.OrganizationName LIKE @PSPrefix + '%' THEN 'Parker Square'
         ELSE 'Other'
@@ -169,7 +176,7 @@ WHERE o.OrganizationStatusId = @ActiveStatusId
       )
       OR (
           o.OrganizationTypeId = @VolunteerTypeId
-          AND o.OrganizationName = @LeaderOrgName
+          AND o.OrganizationName IN (@CCLeaderOrgName, @PSLeaderOrgName, @PSDGroupOrgName)
       )
   )
   -- Intentionally excluded from weekly attendance totals and missing-report warnings:
@@ -184,7 +191,7 @@ WHERE o.OrganizationStatusId = @ActiveStatusId
       WHERE dp.OrgId = o.OrganizationId AND d.ProgId = @ProgramId
   )
   AND (
-      o.OrganizationName = @LeaderOrgName
+      o.OrganizationName IN (@CCLeaderOrgName, @PSLeaderOrgName, @PSDGroupOrgName)
       OR EXISTS (
           SELECT 1
           FROM dbo.DivOrg ds
@@ -200,7 +207,9 @@ ORDER BY Campus, PersonType, SchoolLevel, GradeOrder, Gender, OrganizationName, 
     active_status_id=ORGANIZATION_STATUS_ACTIVE,
     report_date=report_date_sql,
     comparison_date=comparison_date_sql,
-    leader_org_name=LEADER_ATTENDANCE_ORG_NAME.replace("'", "''"),
+    cc_leader_org_name=LEADER_ATTENDANCE_ORG_NAMES[0].replace("'", "''"),
+    ps_leader_org_name=LEADER_ATTENDANCE_ORG_NAMES[1].replace("'", "''"),
+    ps_dgroup_org_name=LEADER_ATTENDANCE_ORG_NAMES[2].replace("'", "''"),
 )
 
 rows = list(q.QuerySql(ATTENDANCE_SQL))
@@ -386,6 +395,23 @@ def campus_section(campus):
     )
 
 
+def leader_rows():
+    grouped = {}
+    for row in rows_for(report_date_sql, person_type="Leaders"):
+        name = str(row.OrganizationName or "")
+        grouped[name] = grouped.get(name, 0) + as_int(row.Attendance)
+
+    html_rows = ""
+    for name in LEADER_ATTENDANCE_ORG_NAMES:
+        html_rows += """
+        <tr>
+          <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#334155;">{name}</td>
+          <td align="right" style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;">{value}</td>
+        </tr>
+        """.format(name=escape_html(name), value=grouped.get(name, 0))
+    return html_rows
+
+
 dashboard_url = (
     model.CmsHost
     + "/PyScript/"
@@ -437,10 +463,7 @@ body = """
         <tr><td style="padding:8px 18px 18px;">
           <div style="padding:8px 12px;background:#fef3c7;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#78350f;">Leader Attendance</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-            <tr>
-              <td style="padding:10px 12px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#334155;">SM: All Volunteers 2026-2027</td>
-              <td align="right" style="padding:10px 12px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;">{leaders}</td>
-            </tr>
+            {leader_rows}
           </table>
         </td></tr>
         <tr><td align="center" style="padding:20px 18px 26px;">
@@ -460,6 +483,7 @@ body = """
     total_card=summary_card("Total", grand_total, "Students + leaders"),
     missing_warning=missing_warning,
     campus_sections="".join(campus_section(campus) for campus in campuses),
+    leader_rows=leader_rows(),
     dashboard_url=dashboard_url,
 )
 

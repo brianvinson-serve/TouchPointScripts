@@ -17,7 +17,13 @@
 - **Sender:** `studentministry@rockpointechurch.org` / `RockPointe Student Ministry`
 - **Queued by:** confirmed live sender PeopleId configured in the script
 
-The script calculates the most recently completed Sunday, even during a manual preview on another day. It separately queries the previous Sunday for headline and campus comparisons. Student attendance uses active Student Ministry Sunday grade organizations. Leader attendance comes only from the exact involvement `SM: All Volunteers 2026-2027`; it is shown as an all-campus total rather than being falsely allocated to Central or Parker Square. `Meetings.NumPresent` is the attendance source, and direct `DivOrg` joins are avoided at report grain.
+The script calculates the most recently completed Sunday, even during a manual run on another day. It separately queries the previous Sunday for headline and campus comparisons. Student attendance uses active Student Ministry Sunday grade organizations. Leader attendance is the combined `Meetings.NumPresent` from exactly these three 2026-2027 organizations:
+
+- `SM: CC Sunday Morning Volunteers 2026-2027`
+- `SM: PS Sunday Morning Volunteers 2026-2027`
+- `SM: PS D Group Leaders 2026-2027`
+
+The email shows one combined leader headline plus detail for each source organization. Direct `DivOrg` joins are avoided at report grain.
 
 TouchPoint may stringify a SQL `DATE` as `M/D/YYYY 12:00:00 AM`. The email script normalizes that format to ISO `YYYY-MM-DD` before comparing and aggregating rows. Do not replace `normalize_date()` with a simple whitespace split; that caused the first live preview to discard valid attendance while reporting every group as missing.
 
