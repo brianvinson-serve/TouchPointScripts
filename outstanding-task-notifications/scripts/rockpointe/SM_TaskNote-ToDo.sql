@@ -30,7 +30,7 @@ FROM (
         tn.StatusId = 4 OR
         ((tn.StatusId = 2 OR tn.StatusId = 3) AND tn.AssigneeId IS NULL)
     )
-    AND tn.IsNote = 0
+    AND (tn.IsNote = 0 OR tn.IsNote IS NULL)
     AND tn.Instructions NOT LIKE 'New Person Data Entry%'
     AND tn.OwnerId IN (SELECT PeopleId FROM @SMStaff)
 
@@ -40,7 +40,7 @@ FROM (
     FROM TaskNote ta
     WHERE (ta.StatusId = 2 OR ta.StatusId = 3)
     AND ta.AssigneeId IS NOT NULL
-    AND ta.IsNote = 0
+    AND (ta.IsNote = 0 OR ta.IsNote IS NULL)
     AND ta.Instructions NOT LIKE 'New Person Data Entry%'
     AND ta.AssigneeId IN (SELECT PeopleId FROM @SMStaff)
 ) t

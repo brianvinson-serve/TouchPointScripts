@@ -76,6 +76,8 @@ Key StatusId values (from docs):
 
 Key columns: `OwnerId`, `AssigneeId`, `StatusId`, `Instructions`, `DueDate`, `IsNote`
 
+Confirmed schema pitfall: RPC's `TaskNote` table does **not** expose an `Id` column in the TouchPoint SQL/Python `q.QuerySql` surface. Do not select `tn.Id AS TaskNoteId`; it causes `Invalid column name 'Id'` and can blank Python report output before rendering.
+
 `IsNote`: 1 = note, 0 or NULL = task. Tasks store NULL (not 0) in practice, so always filter with `(IsNote = 0 OR IsNote IS NULL)` rather than `IsNote = 0` alone.
 
 ### OrganizationMembers
