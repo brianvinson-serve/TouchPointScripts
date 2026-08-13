@@ -59,6 +59,7 @@ for task in q.QuerySql(taskSql):
     taskCount += 1
     instr = model.Markdown(task.Instructions)
     daysOld = task.DaysOld if hasattr(task, 'DaysOld') else 0
+    dueDate = task.DueDate.ToString("M/d/yyyy") if task.DueDate else "No due date"
 
     # Determine urgency styling
     if daysOld > HIGHLIGHT_DAYS_OLD:
@@ -71,7 +72,7 @@ for task in q.QuerySql(taskSql):
     print("""
     <div style="border: 2px solid {7}; margin: 1.5em 0; padding: 1.5em; border-radius: 8px; background: #f9f9f9;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em;">
-            <strong style="font-size: 1.1em;">TaskNoteId {8}</strong>
+            <strong style="font-size: 1.1em;">Follow up with {0}</strong>
             {9}
         </div>
         <table style="width: 100%; border-collapse: collapse;">
@@ -79,6 +80,7 @@ for task in q.QuerySql(taskSql):
             <tr><td style="padding: 4px 8px; font-weight: bold;">Email:</td><td style="padding: 4px 8px;"><a href="mailto:{1}">{1}</a></td></tr>
             <tr><td style="padding: 4px 8px; font-weight: bold;">Phone:</td><td style="padding: 4px 8px;"><a href="tel:{2}">{2}</a></td></tr>
             <tr><td style="padding: 4px 8px; font-weight: bold;">Created:</td><td style="padding: 4px 8px;">{5}</td></tr>
+            <tr><td style="padding: 4px 8px; font-weight: bold;">Due:</td><td style="padding: 4px 8px;">{10}</td></tr>
         </table>
 
         <div style="background: white; padding: 1em; margin: 1em 0; border-left: 4px solid {7};">
@@ -100,8 +102,9 @@ for task in q.QuerySql(taskSql):
         task.CreatedDate,                     # 5 - Created date
         instr,                                # 6 - Task instructions
         borderColor,                          # 7 - Border color based on urgency
-        task.TaskNoteId,                      # 8 - TaskNote primary key
-        urgencyBadge                          # 9 - Urgency badge HTML
+        task.TaskNoteId,                      # 8 - retained for diagnostics
+        urgencyBadge,                         # 9 - Urgency badge HTML
+        dueDate                               # 10 - Due date or fallback
     ))
 
 if taskCount == 0:

@@ -18,10 +18,8 @@ SELECT t.PeopleId, COUNT(*) AS TaskCount
 FROM (
     SELECT tn.OwnerId AS PeopleId
     FROM TaskNote tn
-    WHERE (
-        tn.StatusId = 4 OR
-        ((tn.StatusId = 2 OR tn.StatusId = 3) AND tn.AssigneeId IS NULL)
-    )
+    WHERE tn.StatusId IN (2, 3)
+    AND tn.AssigneeId IS NULL
     AND (tn.IsNote = 0 OR tn.IsNote IS NULL)
     AND (tn.Instructions IS NULL OR tn.Instructions NOT LIKE 'New Person Data Entry%')
     AND tn.OwnerId IN (SELECT PeopleId FROM @SMStaff)
