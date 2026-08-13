@@ -60,6 +60,4 @@ Need reply with:
 
 #### Linear note
 
-Tracked in Linear as PRA-5: https://linear.app/praxen/issue/PRA-5/weekly-sm-attendance-dashboard-email
-
-Caveat: this is RockPointe volunteer / TouchPoint work, but the only Linear team currently visible to this token is `PRA` / Praxen. If a RockPointe Linear team/project/label is created later, move this issue there.
+Tracked under the RPC DEV team in the Touchpoint Backlog project as RPC-1: https://linear.app/praxen/issue/RPC-1/weekly-sm-attendance-dashboard-email
