@@ -110,6 +110,42 @@ Global lookup labels are confirmed through `lookup.MemberType`; ministry-specifi
 
 ---
 
+## RPC Staff Directory
+
+The canonical RPC staff identity key is `People.PeopleId`. Staff email addresses are useful discovery evidence but should not be used as durable application keys.
+
+### Current source rule
+
+Until RPC identifies a maintained employee roster inside TouchPoint, define the **staff-directory candidate set** as People records whose `EmailAddress` or `EmailAddress2` ends in `@rpcstaff.org` (case-insensitive, trimmed). This is a directory/reference rule, not proof of current employment.
+
+The internal focused query and its live exports are retained only in local gitignored paths because this repository is public. They must not be committed or published.
+
+### Review rules
+
+- `UNIQUE_DOMAIN_EMAIL_RECORD` — one non-archived, non-deceased People record owns the normalized staff-domain email and the People record is not duplicate-flagged. The 2026-08-13 export used the older label `CURRENT_CANDIDATE` for this condition; it does **not** prove current employment.
+- `REVIEW_ARCHIVED` — staff-domain email is attached to an archived People record.
+- `REVIEW_DUPLICATE_EMAIL` — more than one People record owns the same normalized staff-domain email.
+- `REVIEW_PERSON_DUPLICATE_FLAG` — TouchPoint marks the People record as having duplicates.
+- `EXCLUDE_DECEASED` — record is deceased and must not be used as a recipient.
+
+Do not infer active employment solely from `@rpcstaff.org`; former staff may retain an address or an archived TouchPoint record. For production recipient lists, resolve and review the current live export, then use PeopleIds with `model.Email`.
+
+### Confirmed directory snapshot
+
+Confirmed 2026-08-13 from `data-dictionary-expander/exports/2026-08-13/rpc-staff-directory-2026-08-13.csv` (a privacy-minimized extract of the original local `RunScript.xlsx`; SHA-256 hashes are recorded in the dated report notes):
+
+- 140 People records have a normalized `@rpcstaff.org` address in `EmailAddress` or `EmailAddress2`.
+- 110 records had a unique domain email and were labeled `CURRENT_CANDIDATE` by the first query version. This label means **unique staff-domain record**, not current employee.
+- 30 records require duplicate-email review.
+- The candidate set includes real people, shared ministry mailboxes, system/test records, and children or household members carrying another person's staff address. The email domain cannot serve as an authoritative whole-staff employment roster.
+- The complete directory and review rows are retained locally in the dated export/report paths, which are gitignored because this repository is public. Do not commit or duplicate the 140-row PII-bearing table here.
+
+### Confirmed SM attendance-report recipients — 2026-08-13
+
+The 12-recipient production PeopleId list was resolved from the live whole-domain export and is embedded in `SM_AttendanceDashboardEmail.py`. Staff email corrections and the complete directory evidence are retained only in local gitignored files because this repository is public. Use PeopleIds—not runtime email-string matching—for the weekly report.
+
+---
+
 ## SM Staff (hardcoded PeopleId list - update when staff changes)
 
 | PeopleId | Name |
@@ -327,7 +363,13 @@ Current contents:
 ```python
 model.CallScript("RegistrationsWithoutAccountCodes")
 ```
-Will add after SM scripts are confirmed working:
+Approved addition for the weekly SM attendance report:
+```python
+if model.DayOfWeek == 1:
+    model.CallScript("SM_AttendanceDashboardEmail")
+```
+
+Still pending for outstanding-task notifications:
 ```python
 if model.DayOfWeek == 2:
     model.CallScript("SM_OutstandingTaskNotifications")

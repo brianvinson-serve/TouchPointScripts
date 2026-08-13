@@ -6,12 +6,11 @@ Active work and request status for the Student Ministry attendance dashboard.
 
 ### Weekly SM attendance dashboard email
 
-**Status:** In progress — waiting on requestor reply  
+**Status:** Wrapped — deployed live and scheduled in MorningBatch on 2026-08-13
 **Requestor:** Libbie Risberg / Student Ministry  
 **Requested:** 2026-08-12  
-**Default send day:** Monday  
-**Default date range:** Fall 2026 semester start (`2026-08-16`) through current date  
-**Candidate recipient alias:** `students@rpcstaff.org`
+**Confirmed send day:** Monday morning
+**Confirmed date range:** immediately preceding Sunday
 
 #### Request
 
@@ -36,10 +35,19 @@ Key findings:
 - Therefore, the safest primary recipient list is actual TouchPoint people via a saved query/tag/PeopleIds. The `students@rpcstaff.org` alias may be usable as CC, but must be tested because delivery also depends on the Google Workspace group accepting TouchPoint-sent mail.
 - TouchPoint's normal UI can send to single email addresses, but that does not make raw aliases the best primary recipient model for recurring Python automation.
 
-#### Recommended implementation
+#### Confirmed response from Libbie
 
-- Create a Python email wrapper script, tentatively `SM_AttendanceDashboardEmail`.
-- Generate or call the existing attendance dashboard report with `StartDate=2026-08-16` and `EndDate=today`.
+Libbie confirmed that the email should cover only the previous Sunday, that Monday morning is the correct schedule, and that the requested audience contains 12 staff recipients. The confirmed production PeopleIds are documented in `DB_REFERENCE.md`; staff email addresses remain only in local gitignored evidence because this repository is public.
+
+#### Implementation
+
+- Deploy `SM_AttendanceDashboardEmail.py` as Python Special Content `SM_AttendanceDashboardEmail`.
+- The report calculates the most recently completed Sunday and the Sunday before it.
+- It renders email-safe, mobile-first HTML rather than embedding the JavaScript dashboard.
+- It includes headline student/volunteer totals, week-over-week comparison, campus summaries, grade/gender detail, volunteer detail, and a missing-attendance warning.
+- It links to the full dashboard parameterized to the report Sunday.
+- It sends to 12 confirmed TouchPoint PeopleIds from the 2026-08-13 live staff-directory export.
+- Weekly totals and missing-attendance warnings intentionally exclude all `Mentor Program` organization variants and `SM: PS Health and Safety`.
 - Send Monday via `MorningBatch`:
 
 ```python
@@ -47,16 +55,21 @@ if model.DayOfWeek == 1:
     model.CallScript("SM_AttendanceDashboardEmail")
 ```
 
-- Use a saved TouchPoint recipient query/tag/PeopleId list as the primary recipient list.
-- Optionally test `students@rpcstaff.org` in `cclist` once the primary list is known.
+- Follow the RPC-3 rollout pattern: preview first, then one controlled live recipient, then production audience, then scheduling.
 
-#### Waiting on Libbie
+#### Completed live validation
 
-Need reply with:
+- All 12 requested recipients were resolved to confirmed TouchPoint PeopleIds.
+- The previous-Sunday report rendered 235 students, 46 volunteers, and 281 total for 2026-08-09.
+- Mobile-first rendering and the parameterized report link were validated in TouchPoint preview.
+- All Mentor Program variants and `SM: PS Health and Safety` were removed from totals and missing-attendance warnings.
+- `TEST_MODE = False` was deployed and the Monday `MorningBatch` call was added by Brian on 2026-08-13.
 
-- desired recipient people/email addresses if not relying solely on the alias;
-- confirmation that Monday is acceptable;
-- optional confirmation that Fall 2026 should start on `2026-08-16`.
+#### 2026-08-13 preview defect and root cause
+
+The first live preview displayed zero attendance for 2026-08-09 even though a confirmed student check-in existed with a populated `NumPresent` value.
+
+The meeting passed every original SQL filter: active status 30, type 201, `SM: CC` name, Program 1109, and Division 11. The involvement did not change. The defect was Python date normalization: TouchPoint returned the SQL date as `8/9/2026 12:00:00 AM`, but the email aggregator compared that unnormalized value with ISO string `2026-08-09`. The email script now normalizes both ISO and M/D/YYYY TouchPoint date strings before aggregation.
 
 #### Linear note
 

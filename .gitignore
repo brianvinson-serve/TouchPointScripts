@@ -9,3 +9,10 @@ node_modules/
 data-dictionary-expander/generated/*.sqlite
 data-dictionary-expander/generated/*.sqlite-shm
 data-dictionary-expander/generated/*.sqlite-wal
+data-dictionary-expander/exports/*/RunScript.xlsx
+data-dictionary-expander/exports/*/rpc-staff-directory-*.csv
+data-dictionary-expander/reports/*/rpc-staff-directory-snapshot.md
+attendance-dashboard/SM_AttendanceEmailRecipientLookup.sql
+attendance-dashboard/SM_AttendanceMeetingDiagnostic.py
+data-dictionary-expander/local/render_rpc_staff_directory.py
+data-dictionary-expander/sql/focused/RPC_StaffDirectory.sql
