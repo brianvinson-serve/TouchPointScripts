@@ -24,10 +24,18 @@ else:
     peopleId = model.UserPeopleId
 
 # SQL to fetch outstanding tasks
-# StatusId values: 1=Complete, 2=Pending, 3=Active, 4=Declined, 5=Archived, 6=Cancelled
+# Confirmed TaskNote.StatusId values: 1=Complete, 2=Pending, 3=Active,
+# 4=Declined, 5=Archived/note history. Do not join lookup.TaskStatus.
+# IsNote=0 filters to current tasks in the 2026-08-13 profile; retain NULL in
+# the predicate defensively for older/edge records.
 taskSql = """
 SELECT
-    tn.*,
+    tn.TaskNoteId,
+    tn.Instructions,
+    tn.CreatedDate,
+    tn.DueDate,
+    tn.OwnerId,
+    tn.AssigneeId,
     COALESCE(abt.NickName, abt.FirstName) AS GoesBy,
     abt.LastName,
     abt.EmailAddress,
@@ -40,12 +48,14 @@ WHERE (
     (tn.OwnerId = {0} AND tn.AssigneeId IS NULL) OR
     (tn.AssigneeId = {0})
 )
-AND tn.StatusID NOT IN (1, 5, 6)  -- Not Complete, Archived, or Cancelled
+AND tn.StatusId IN (2, 3)
+AND (tn.IsNote = 0 OR tn.IsNote IS NULL)
+AND (tn.Instructions IS NULL OR tn.Instructions NOT LIKE 'New Person Data Entry%')
 ORDER BY tn.CreatedDate ASC
 """.format(peopleId)
 
 taskCount = 0
-for task in q.QuerySql(taskSql, peopleId, None):
+for task in q.QuerySql(taskSql):
     taskCount += 1
     instr = model.Markdown(task.Instructions)
     daysOld = task.DaysOld if hasattr(task, 'DaysOld') else 0
@@ -61,7 +71,7 @@ for task in q.QuerySql(taskSql, peopleId, None):
     print("""
     <div style="border: 2px solid {7}; margin: 1.5em 0; padding: 1.5em; border-radius: 8px; background: #f9f9f9;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em;">
-            <strong style="font-size: 1.1em;">Task #{8}</strong>
+            <strong style="font-size: 1.1em;">TaskNoteId {8}</strong>
             {9}
         </div>
         <table style="width: 100%; border-collapse: collapse;">
@@ -90,7 +100,7 @@ for task in q.QuerySql(taskSql, peopleId, None):
         task.CreatedDate,                     # 5 - Created date
         instr,                                # 6 - Task instructions
         borderColor,                          # 7 - Border color based on urgency
-        taskCount,                            # 8 - Task number
+        task.TaskNoteId,                      # 8 - TaskNote primary key
         urgencyBadge                          # 9 - Urgency badge HTML
     ))
 

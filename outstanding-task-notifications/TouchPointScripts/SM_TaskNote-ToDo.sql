@@ -5,35 +5,36 @@
 -- DEPLOYMENT: Admin > Advanced > Special Content > SQL Scripts
 -- File name should be: SM_TaskNote-ToDo
 --
--- MODIFICATIONS FROM ORIGINAL:
--- 1. Can be filtered by Organization/Ministry (commented section below)
--- 2. Excludes system-generated tasks
--- 3. Improved status handling
+-- Confirmed SM staff PeopleId list. Keep synchronized with DB_REFERENCE.md.
+-- Do not infer staff/leader status from MemberTypeId 220; lookup.MemberType says
+-- 220 = Member globally and 140 = Leader. Use the diagnostic dashboard query to
+-- validate any future involvement-based filter before replacing this list.
+DECLARE @SMStaff TABLE (PeopleId INT)
+INSERT INTO @SMStaff VALUES
+    (46965), (659), (284), (23164), (1675),
+    (40594), (36696), (28000), (19570), (118)
 
 SELECT t.PeopleId, COUNT(*) AS TaskCount
 FROM (
-    -- Tasks where user is Owner (and no assignee)
-    SELECT tn.*, tn.OwnerId AS PeopleId
+    SELECT tn.OwnerId AS PeopleId
     FROM TaskNote tn
     WHERE (
-        tn.StatusId = 4 OR  -- Declined
-        ((tn.StatusId = 2 OR tn.StatusId = 3) AND tn.AssigneeId IS NULL)  -- Pending/Active with no assignee
+        tn.StatusId = 4 OR
+        ((tn.StatusId = 2 OR tn.StatusId = 3) AND tn.AssigneeId IS NULL)
     )
-    AND tn.Instructions NOT LIKE 'New Person Data Entry%'  -- Exclude system tasks
-    -- OPTIONAL: Filter by ministry organization
-    -- Uncomment and modify the line below to filter by specific org
-    -- AND tn.OwnerId IN (SELECT PeopleId FROM OrganizationMembers WHERE OrganizationId = YOUR_SM_ORG_ID)
+    AND (tn.IsNote = 0 OR tn.IsNote IS NULL)
+    AND (tn.Instructions IS NULL OR tn.Instructions NOT LIKE 'New Person Data Entry%')
+    AND tn.OwnerId IN (SELECT PeopleId FROM @SMStaff)
 
-    UNION
+    UNION ALL
 
-    -- Tasks where user is Assignee
-    SELECT ta.*, ta.AssigneeId AS PeopleId
+    SELECT ta.AssigneeId AS PeopleId
     FROM TaskNote ta
-    WHERE (ta.StatusId = 2 OR ta.StatusId = 3)  -- Pending or Active
+    WHERE (ta.StatusId = 2 OR ta.StatusId = 3)
     AND ta.AssigneeId IS NOT NULL
-    AND ta.Instructions NOT LIKE 'New Person Data Entry%'  -- Exclude system tasks
-    -- OPTIONAL: Filter by ministry organization
-    -- AND ta.AssigneeId IN (SELECT PeopleId FROM OrganizationMembers WHERE OrganizationId = YOUR_SM_ORG_ID)
+    AND (ta.IsNote = 0 OR ta.IsNote IS NULL)
+    AND (ta.Instructions IS NULL OR ta.Instructions NOT LIKE 'New Person Data Entry%')
+    AND ta.AssigneeId IN (SELECT PeopleId FROM @SMStaff)
 ) t
 GROUP BY t.PeopleId
 HAVING COUNT(*) > 0

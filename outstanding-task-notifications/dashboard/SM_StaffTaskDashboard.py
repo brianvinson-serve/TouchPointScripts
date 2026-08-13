@@ -135,6 +135,7 @@ if where_extra:
 # - Exclude TouchPoint's noisy New Person Data Entry tasks.
 task_sql = """
 SELECT
+    tn.TaskNoteId,
     tn.OwnerId,
     COALESCE(ownerPerson.NickName, ownerPerson.FirstName) AS OwnerFirst,
     ownerPerson.LastName AS OwnerLast,
@@ -356,6 +357,7 @@ else:
         <th>Age</th>
         <th>Due</th>
         <th>Task</th>
+        <th>TaskNoteId</th>
       </tr>
     </thead>
     <tbody>
@@ -402,6 +404,7 @@ else:
         <td>{age}</td>
         <td>{due}</td>
         <td class="instructions">{instructions}</td>
+        <td><code>{task_note_id}</code></td>
       </tr>
         """.format(
             row_class=row_class,
@@ -412,6 +415,7 @@ else:
             age=age_badge,
             due=due_badge,
             instructions=safe_markdown(task.Instructions),
+            task_note_id=html_escape(task.TaskNoteId),
         ))
     print("""
     </tbody>

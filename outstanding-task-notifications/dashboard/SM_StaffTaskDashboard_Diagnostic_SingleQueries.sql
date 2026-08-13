@@ -308,3 +308,41 @@ GROUP BY
         ELSE assigneePerson.LastName
     END
 ORDER BY TaskTotal DESC, AssigneeLast
+
+
+/* ============================================================
+   QUERY 11: Focused live SM staff/volunteer involvement-role check.
+   Expected: Rows for confirmed staff/volunteers in SM: Student Ministry Staff
+   and SM: All Volunteers* involvements. Use this to decide whether the long-term
+   filter should remain a hardcoded PeopleId list or move to an involvement-based
+   filter. Do not assume MemberTypeId 220 means leader; lookup.MemberType says
+   220 = Member globally, while 140 = Leader.
+   ============================================================ */
+SELECT
+    staff.PeopleId,
+    staff.ExpectedName,
+    o.OrganizationId,
+    o.OrganizationName,
+    o.OrganizationTypeId,
+    om.MemberTypeId,
+    mt.Description AS MemberTypeDescription,
+    p.EmailAddress
+FROM (
+    SELECT 46965 AS PeopleId, 'Isaac Jiles' AS ExpectedName
+    UNION ALL SELECT 659, 'Price Peden'
+    UNION ALL SELECT 284, 'Courtney Edmondson'
+    UNION ALL SELECT 23164, 'Joseph McCalley'
+    UNION ALL SELECT 1675, 'Libbie Risberg'
+    UNION ALL SELECT 40594, 'Haven Burton'
+    UNION ALL SELECT 36696, 'Joshua Watson'
+    UNION ALL SELECT 28000, 'Abbie Vinson'
+    UNION ALL SELECT 19570, 'Weston Watts'
+    UNION ALL SELECT 118, 'Shawn Adams'
+) staff
+LEFT JOIN People p ON p.PeopleId = staff.PeopleId
+LEFT JOIN OrganizationMembers om ON om.PeopleId = staff.PeopleId
+LEFT JOIN Organizations o ON o.OrganizationId = om.OrganizationId
+LEFT JOIN lookup.MemberType mt ON mt.Id = om.MemberTypeId
+WHERE o.OrganizationName = 'SM: Student Ministry Staff'
+   OR o.OrganizationName LIKE 'SM: All Volunteers%'
+ORDER BY staff.ExpectedName, o.OrganizationName

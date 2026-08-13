@@ -45,7 +45,7 @@ Edit `SM_OutstandingTaskNotifications.py` before deploying:
 ```python
 FROM_EMAIL = "your-ministry@yourchurch.org"
 FROM_NAME = "Your Church Ministry"
-QUEUED_BY_ID = 0  # Get from TouchPoint admin
+QUEUED_BY = 23164  # PeopleId whose record queues the email; confirm before deployment
 ```
 
 ### Scheduling

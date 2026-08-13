@@ -134,7 +134,7 @@ Deploy in this exact order:
    Location: Admin > Advanced > Special Content > Python Scripts
    Click: +New Python Script File
    Name: SM_OutstandingTaskNotifications
-   NOTE: Update QUEUED_BY_ID and email addresses first!
+   NOTE: Confirm QUEUED_BY PeopleId and sender email/name first!
 
 5. SCHEDULE (Optional):
    Add to MorningBatch or ScheduledTasks:

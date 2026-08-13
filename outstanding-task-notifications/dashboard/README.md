@@ -34,7 +34,7 @@ Linear is still useful as a project/backlog tracker for enhancement requests and
 1. In TouchPoint, create or update Python Script `SM_StaffTaskDashboard` with the contents of `SM_StaffTaskDashboard.py`.
 2. Run the script from TouchPoint Special Content.
 3. Confirm the top metrics render.
-4. Confirm the detail view shows columns for Owner, Assignee, About, Status, Age, Due, and Task.
+4. Confirm the detail view shows columns for Owner, Assignee, About, Status, Age, Due, Task, and TaskNoteId.
 5. Test filters:
    - Owner = one SM staff member
    - Assignee = one SM staff member
@@ -49,7 +49,7 @@ Linear is still useful as a project/backlog tracker for enhancement requests and
 - Local validation can only check Python syntax. The query and rendered dashboard still need live TouchPoint execution.
 - The SM staff list is hardcoded. Update `SM_STAFF` and `DB_REFERENCE.md` when staff changes.
 - The dashboard intentionally excludes `New Person Data Entry%` tasks to match the existing SM reminder behavior.
-- Task filtering uses `(IsNote = 0 OR IsNote IS NULL)` because live tasks store `NULL` in practice.
+- Task filtering uses `(IsNote = 0 OR IsNote IS NULL)` defensively, but the 2026-08-13 full RPC profile found current tasks at `IsNote = 0` and no `NULL` `IsNote` rows.
 
 ## Linear backlog recommendation
 

@@ -142,11 +142,11 @@ if model.ScheduledTime == "1900" and model.DayOfWeek == 2:
 In `SM_OutstandingTaskNotifications.py`:
 - `FROM_EMAIL` - Student Ministry email address
 - `FROM_NAME` - Sender display name
-- `QUEUED_BY_ID` - Get from TouchPoint admin (email queue identifier)
+- `QUEUED_BY` - PeopleId whose record the email is queued under; current local default is Joseph McCalley (`23164`).
 
-In `SM_TaskNote-ToDo.sql` (optional):
-- Uncomment organization filter lines to limit to SM staff only
-- Replace `YOUR_SM_ORG_ID` with actual Student Ministry organization ID
+In `SM_TaskNote-ToDo.sql`:
+- Keep the hardcoded SM staff PeopleId list synchronized with `DB_REFERENCE.md` until the focused involvement-role check confirms a maintained long-term source of truth.
+- Do not filter to `MemberTypeId = 220` as though it means leader; RPC lookup evidence says 220 = Member globally and 140 = Leader.
 
 In `SM_OutstandingTasksReminderEmail.md`:
 - Update dashboard link with actual SM organization ID
@@ -154,13 +154,15 @@ In `SM_OutstandingTasksReminderEmail.md`:
 
 ## Key TouchPoint Concepts
 
-### Task Status IDs
+### TaskNote Status IDs
+Confirmed for RPC `TaskNote.StatusId` values:
 - 1 = Complete
 - 2 = Pending
-- 3 = Active
+- 3 = Active / accepted
 - 4 = Declined
-- 5 = Archived
-- 6 = Cancelled
+- 5 = Archived / note history
+
+Do not join `TaskNote.StatusId` to `lookup.TaskStatus`; that lookup uses 10-70 and does not map to TaskNote rows.
 
 ### Email Template Tags
 - `{first}` - Recipient's first name
@@ -181,7 +183,7 @@ In `SM_OutstandingTasksReminderEmail.md`:
 
 ### Emails Not Sending
 - Verify email template name matches exactly
-- Check QUEUED_BY_ID is valid
+- Check QUEUED_BY PeopleId is valid and allowed to queue this email
 - Verify SQL script returns recipients
 
 ### No Tasks Showing

@@ -24,12 +24,18 @@ else:
     peopleId = model.UserPeopleId
 
 # SQL to fetch outstanding tasks
-# Confirmed StatusId values: 2=Pending, 3=Active (Accepted), 4=Declined
-# IsNote=0 filters to tasks in the 2026-08-13 full profile; retain NULL in the
-# predicate defensively for older/edge records. IsNote=1 is note/history.
+# Confirmed TaskNote.StatusId values: 1=Complete, 2=Pending, 3=Active,
+# 4=Declined, 5=Archived/note history. Do not join lookup.TaskStatus.
+# IsNote=0 filters to current tasks in the 2026-08-13 profile; retain NULL in
+# the predicate defensively for older/edge records.
 taskSql = """
 SELECT
-    tn.*,
+    tn.TaskNoteId,
+    tn.Instructions,
+    tn.CreatedDate,
+    tn.DueDate,
+    tn.OwnerId,
+    tn.AssigneeId,
     COALESCE(abt.NickName, abt.FirstName) AS GoesBy,
     abt.LastName,
     abt.EmailAddress,
@@ -44,6 +50,7 @@ WHERE (
 )
 AND tn.StatusId IN (2, 3)
 AND (tn.IsNote = 0 OR tn.IsNote IS NULL)
+AND (tn.Instructions IS NULL OR tn.Instructions NOT LIKE 'New Person Data Entry%')
 ORDER BY tn.CreatedDate ASC
 """.format(peopleId)
 
@@ -51,25 +58,20 @@ taskCount = 0
 for task in q.QuerySql(taskSql):
     taskCount += 1
     instr = model.Markdown(task.Instructions)
-    daysOld = task.DaysOld if hasattr(task, "DaysOld") else 0
+    daysOld = task.DaysOld if hasattr(task, 'DaysOld') else 0
 
     # Determine urgency styling
     if daysOld > HIGHLIGHT_DAYS_OLD:
         borderColor = "#e74c3c"  # Red for overdue
-        urgencyBadge = '<span style="background:#e74c3c;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">OVERDUE - {} days</span>'.format(
-            daysOld
-        )
+        urgencyBadge = '<span style="background:#e74c3c;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">OVERDUE - {} days</span>'.format(daysOld)
     else:
         borderColor = "#3498db"  # Blue for normal
-        urgencyBadge = '<span style="background:#3498db;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">{} days old</span>'.format(
-            daysOld
-        )
+        urgencyBadge = '<span style="background:#3498db;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">{} days old</span>'.format(daysOld)
 
-    print(
-        """
+    print("""
     <div style="border: 2px solid {7}; margin: 1.5em 0; padding: 1.5em; border-radius: 8px; background: #f9f9f9;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em;">
-            <strong style="font-size: 1.1em;">Task #{8}</strong>
+            <strong style="font-size: 1.1em;">TaskNoteId {8}</strong>
             {9}
         </div>
         <table style="width: 100%; border-collapse: collapse;">
@@ -90,20 +92,17 @@ for task in q.QuerySql(taskSql):
         </div>
     </div>
     """.format(
-            task.GoesBy + " " + task.LastName,  # 0 - Full name
-            task.EmailAddress,  # 1 - Email
-            model.FmtPhone(task.CellPhone),  # 2 - Phone
-            model.CmsHost,  # 3 - TouchPoint URL
-            task.AboutPeopleId,  # 4 - PeopleId for profile link
-            task.CreatedDate,  # 5 - Created date
-            instr,  # 6 - Task instructions
-            borderColor,  # 7 - Border color based on urgency
-            taskCount,  # 8 - Task number
-            urgencyBadge,  # 9 - Urgency badge HTML
-        )
-    )
+        task.GoesBy + " " + task.LastName,  # 0 - Full name
+        task.EmailAddress,                    # 1 - Email
+        model.FmtPhone(task.CellPhone),       # 2 - Phone
+        model.CmsHost,                        # 3 - TouchPoint URL
+        task.AboutPeopleId,                   # 4 - PeopleId for profile link
+        task.CreatedDate,                     # 5 - Created date
+        instr,                                # 6 - Task instructions
+        borderColor,                          # 7 - Border color based on urgency
+        task.TaskNoteId,                      # 8 - TaskNote primary key
+        urgencyBadge                          # 9 - Urgency badge HTML
+    ))
 
 if taskCount == 0:
-    print(
-        '<div style="text-align: center; padding: 2em; color: #27ae60;"><strong>No outstanding tasks found. Great job!</strong></div>'
-    )
+    print('<div style="text-align: center; padding: 2em; color: #27ae60;"><strong>No outstanding tasks found. Great job!</strong></div>')

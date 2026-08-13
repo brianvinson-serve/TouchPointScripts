@@ -115,15 +115,17 @@ class TouchPointAPI:
         print("QUERYING TASKNOTE TABLE")
         print("="*60)
 
-        # Try to get tasks - filter for non-complete status
-        # StatusId: 1=Complete, 2=Pending, 3=Active, 4=Declined, 5=Archived, 6=Cancelled
+        # Historical API probe only: DB_REFERENCE.md now confirms TaskNote is not exposed
+        # through RPC's OData path. For live task work, use TouchPoint Special Content SQL/Python.
+        # Confirmed TaskNote StatusId values are 1=Complete, 2=Pending, 3=Active,
+        # 4=Declined, and 5=Archived/note history; do not join lookup.TaskStatus.
 
         queries = [
             # All tasks (limited)
             ("/api/TaskNote?$top=10", "First 10 tasks"),
-            # Non-complete tasks
-            ("/api/TaskNote?$filter=StatusId ne 1 and StatusId ne 5 and StatusId ne 6&$top=20",
-             "Outstanding tasks (not complete/archived/cancelled)"),
+            # Historical only; this endpoint is not exposed in RPC's OData path.
+            ("/api/TaskNote?$filter=(StatusId eq 2 or StatusId eq 3 or StatusId eq 4)&$top=20",
+             "Outstanding tasks (historical OData probe; current path is Special Content)"),
             # With expansion
             ("/api/TaskNote?$expand=AboutPerson&$top=5",
              "Tasks with person details"),
@@ -145,7 +147,7 @@ class TouchPointAPI:
                         print(f"  Found {len(tasks)} tasks")
                         for i, task in enumerate(tasks[:5]):
                             print(f"\n  Task {i+1}:")
-                            for key in ['Id', 'Description', 'StatusId', 'OwnerId', 'AssigneeId', 'CreatedDate', 'Instructions']:
+                            for key in ['TaskNoteId', 'Description', 'StatusId', 'OwnerId', 'AssigneeId', 'CreatedDate', 'Instructions']:
                                 if key in task:
                                     val = str(task[key])[:60]
                                     print(f"    {key}: {val}")
@@ -192,7 +194,7 @@ class TouchPointAPI:
 
         # Our SQL looks for:
         # - StatusId 2 (Pending), 3 (Active), 4 (Declined)
-        # - Excluding StatusId 1 (Complete), 5 (Archived), 6 (Cancelled)
+        # - Excluding StatusId 1 (Complete) and 5 (Archived/note history)
         # - Excluding "New Person Data Entry" tasks
 
         url = f"{BASE_URL}/api/TaskNote?$filter=(StatusId eq 2 or StatusId eq 3 or StatusId eq 4)&$top=50"
