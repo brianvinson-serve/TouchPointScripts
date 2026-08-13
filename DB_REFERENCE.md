@@ -227,6 +227,26 @@ should be the maintained source of truth going forward.
 
 ## Attendance Tables
 
+### Attend
+Individual attendance table. One row per person/meeting attendance record; use this rather than `Meetings.NumPresent` when the report needs student names or contact information.
+
+Confirmed structurally from the 2026-08-13 export:
+- Primary key: `AttendId`.
+- Declared joins: `PeopleId -> People.PeopleId`, `MeetingId -> Meetings.MeetingId`, `OrganizationId -> Organizations.OrganizationId`, `AttendanceTypeId -> lookup.AttendType.Id`, and `MemberTypeId -> lookup.MemberType.Id`.
+- Relevant fields include `PeopleId`, `MeetingId`, `OrganizationId`, `MeetingDate`, `AttendanceFlag`, `NoShow`, and `EffAttendFlag`.
+- For the SM student contact report, require `AttendanceFlag = 1` and defensively exclude `NoShow = 1`. This is the implemented rule and still requires live RPC validation against known attendance records.
+
+### Student and household contact joins
+
+Confirmed structurally from the 2026-08-13 export:
+- `People.FamilyId -> Families.FamilyId`.
+- `People.GenderId -> lookup.Gender.Id` and `People.GradeLevelId -> lookup.GradeLevel.Id`.
+- `People.PositionInFamilyId -> lookup.FamilyPosition.Id`; the lookup structurally exposes `Child`, `PrimaryAdult`, and `SecondaryAdult` fields, but their live RPC values and maintenance quality have not been validated. Do not require `FamilyPosition.Child = 1` in operational student reports until focused live evidence confirms it; that gate is a leading suspected cause of the first SM contact-export query returning zero rows.
+- `Families` exposes `HeadOfHouseholdId` and `HeadOfHouseholdSpouseId`. The confirmed family table has no household-level email field; email addresses live on People records.
+- Contact exports should label the two family heads neutrally as Parent/Guardian 1 and Parent/Guardian 2 rather than inferring mother/father roles.
+- `SM_StudentContactExport` current grade is profile data, not an organization-name calculation: it resolves `People.GradeLevelId -> lookup.GradeLevel` and displays `Code`, then `Description`, then the legacy `People.Grade` value as fallback. Live validation on 2026-08-13 showed adult volunteer Jason McMahon with `G9`, so grade is not reliable evidence that a person is a student.
+- For person-level volunteer exclusion in this report, use membership in any annual involvement named `SM: All Volunteers%`, not only the current-year name. Live validation showed the exact `SM: All Volunteers 2026-2027` roster excluded Brian Vinson but missed volunteer Jason McMahon during rollover.
+
 ### Meetings
 Core attendance table. One row per meeting instance (org + date + time).
 
