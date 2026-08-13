@@ -3,7 +3,8 @@
 # PURPOSE:
 # - Sends a mobile-friendly report each Monday for the immediately preceding Sunday.
 # - Compares headline and campus totals with the Sunday before that.
-# - Lists current-Sunday attendance by campus, school level, grade/gender, and volunteers.
+# - Lists current-Sunday student attendance by campus and leader attendance from
+#   SM: All Volunteers 2026-2027.
 # - Flags active Sunday attendance organizations with no meeting row for the report date.
 #
 # DEPLOYMENT: Admin > Advanced > Special Content > Python Scripts
@@ -14,10 +15,9 @@
 # - studentministry@rockpointechurch.org / RockPointe Student Ministry sent successfully.
 # - No saved draft, email template, or HTML Special Content dependency is required.
 #
-# SAFE TESTING:
-# - TEST_MODE = True renders the report and sends no email.
-# - TEST_MODE = False sends to RECIPIENT_PEOPLE_IDS.
-# - Keep TEST_MODE = True until a controlled live send is explicitly approved.
+# PRODUCTION BEHAVIOR:
+# - Normal TPC execution and the Monday MorningBatch call send to all confirmed recipients.
+# - There is no preview or single-recipient branch in this production artifact.
 #
 # SCHEDULING (only after a controlled live send succeeds):
 #   if model.DayOfWeek == 1:  # Monday
@@ -32,8 +32,6 @@ global model, q
 # ============================================================
 # CONFIGURATION
 # ============================================================
-
-TEST_MODE = False
 
 FROM_EMAIL = "studentministry@rockpointechurch.org"
 FROM_NAME = "RockPointe Student Ministry"
@@ -64,6 +62,7 @@ SUNDAY_DIVISION_ID = 11
 STUDENT_TYPE_ID = 201
 VOLUNTEER_TYPE_ID = 207
 ORGANIZATION_STATUS_ACTIVE = 30
+LEADER_ATTENDANCE_ORG_NAME = "SM: All Volunteers 2026-2027"
 
 # ============================================================
 # DATE PARAMETERS
@@ -99,16 +98,18 @@ DECLARE @ReportDate      DATE = '{report_date}'
 DECLARE @ComparisonDate  DATE = '{comparison_date}'
 DECLARE @CCPrefix        VARCHAR(10) = 'SM: CC '
 DECLARE @PSPrefix        VARCHAR(10) = 'SM: PS '
+DECLARE @LeaderOrgName   VARCHAR(100) = '{leader_org_name}'
 
 SELECT
     Campus = CASE
+        WHEN o.OrganizationName = @LeaderOrgName THEN 'All Campuses'
         WHEN o.OrganizationName LIKE @CCPrefix + '%' THEN 'Central'
         WHEN o.OrganizationName LIKE @PSPrefix + '%' THEN 'Parker Square'
         ELSE 'Other'
     END,
     PersonType = CASE o.OrganizationTypeId
         WHEN @StudentTypeId THEN 'Students'
-        WHEN @VolunteerTypeId THEN 'Volunteers'
+        WHEN @VolunteerTypeId THEN 'Leaders'
         ELSE 'Other'
     END,
     SchoolLevel = CASE
@@ -161,8 +162,16 @@ LEFT JOIN dbo.Meetings m
     ON m.OrganizationId = o.OrganizationId
    AND CAST(m.MeetingDate AS DATE) IN (@ReportDate, @ComparisonDate)
 WHERE o.OrganizationStatusId = @ActiveStatusId
-  AND (o.OrganizationName LIKE @CCPrefix + '%' OR o.OrganizationName LIKE @PSPrefix + '%')
-  AND o.OrganizationTypeId IN (@StudentTypeId, @VolunteerTypeId)
+  AND (
+      (
+          o.OrganizationTypeId = @StudentTypeId
+          AND (o.OrganizationName LIKE @CCPrefix + '%' OR o.OrganizationName LIKE @PSPrefix + '%')
+      )
+      OR (
+          o.OrganizationTypeId = @VolunteerTypeId
+          AND o.OrganizationName = @LeaderOrgName
+      )
+  )
   -- Intentionally excluded from weekly attendance totals and missing-report warnings:
   -- AND o.OrganizationName NOT LIKE '%Mentor Program%'
   -- AND o.OrganizationName <> 'SM: PS Health and Safety'
@@ -174,10 +183,13 @@ WHERE o.OrganizationStatusId = @ActiveStatusId
       JOIN dbo.Division d ON d.Id = dp.DivId
       WHERE dp.OrgId = o.OrganizationId AND d.ProgId = @ProgramId
   )
-  AND EXISTS (
-      SELECT 1
-      FROM dbo.DivOrg ds
-      WHERE ds.OrgId = o.OrganizationId AND ds.DivId = @SundayDivId
+  AND (
+      o.OrganizationName = @LeaderOrgName
+      OR EXISTS (
+          SELECT 1
+          FROM dbo.DivOrg ds
+          WHERE ds.OrgId = o.OrganizationId AND ds.DivId = @SundayDivId
+      )
   )
 ORDER BY Campus, PersonType, SchoolLevel, GradeOrder, Gender, OrganizationName, MeetingDate
 """.format(
@@ -188,6 +200,7 @@ ORDER BY Campus, PersonType, SchoolLevel, GradeOrder, Gender, OrganizationName, 
     active_status_id=ORGANIZATION_STATUS_ACTIVE,
     report_date=report_date_sql,
     comparison_date=comparison_date_sql,
+    leader_org_name=LEADER_ATTENDANCE_ORG_NAME.replace("'", "''"),
 )
 
 rows = list(q.QuerySql(ATTENDANCE_SQL))
@@ -277,10 +290,10 @@ def short_org_name(name):
 
 campuses = ["Central", "Parker Square"]
 student_total = total_for(report_date_sql, person_type="Students")
-volunteer_total = total_for(report_date_sql, person_type="Volunteers")
-grand_total = student_total + volunteer_total
+leader_total = total_for(report_date_sql, person_type="Leaders")
+grand_total = student_total + leader_total
 previous_student_total = total_for(comparison_date_sql, person_type="Students")
-previous_volunteer_total = total_for(comparison_date_sql, person_type="Volunteers")
+previous_leader_total = total_for(comparison_date_sql, person_type="Leaders")
 
 # LEFT JOIN produces one row with MeetingDate NULL for an active Sunday org that has
 # neither current nor comparison attendance. An org with comparison attendance but no
@@ -343,40 +356,17 @@ def detail_rows(campus, school_level):
     return html_rows
 
 
-def volunteer_rows(campus):
-    selected = rows_for(report_date_sql, campus, "Volunteers")
-    grouped = {}
-    for row in selected:
-        label = short_org_name(row.OrganizationName)
-        grouped[label] = grouped.get(label, 0) + as_int(row.Attendance)
-
-    html_rows = ""
-    for label in sorted(grouped):
-        html_rows += """
-        <tr>
-          <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#334155;">{label}</td>
-          <td align="right" style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;">{value}</td>
-        </tr>
-        """.format(label=escape_html(label), value=grouped[label])
-    return html_rows
-
-
 def campus_section(campus):
     students = total_for(report_date_sql, campus, "Students")
-    volunteers = total_for(report_date_sql, campus, "Volunteers")
-    current_total = students + volunteers
-    previous_total = (
-        total_for(comparison_date_sql, campus, "Students")
-        + total_for(comparison_date_sql, campus, "Volunteers")
-    )
+    previous_total = total_for(comparison_date_sql, campus, "Students")
     return """
     <tr><td style="padding:24px 18px 8px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <tr>
           <td style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">{campus}</td>
-          <td align="right" style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">{total}</td>
+          <td align="right" style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">{students}</td>
         </tr>
-        <tr><td colspan="2" style="padding-top:3px;font-family:Arial,sans-serif;font-size:14px;line-height:21px;color:#475569;">{students} students &middot; {volunteers} volunteers &middot; {delta}</td></tr>
+        <tr><td colspan="2" style="padding-top:3px;font-family:Arial,sans-serif;font-size:14px;line-height:21px;color:#475569;">{students} students &middot; {delta}</td></tr>
       </table>
     </td></tr>
     <tr><td style="padding:0 18px 8px;">
@@ -387,19 +377,12 @@ def campus_section(campus):
       <div style="padding:8px 12px;background:#dbeafe;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#12355b;">High School</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{high_rows}</table>
     </td></tr>
-    <tr><td style="padding:8px 18px 18px;">
-      <div style="padding:8px 12px;background:#fef3c7;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#78350f;">Volunteers</div>
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{volunteer_rows}</table>
-    </td></tr>
     """.format(
         campus=campus,
-        total=current_total,
         students=students,
-        volunteers=volunteers,
-        delta=delta_text(current_total, previous_total),
+        delta=delta_text(students, previous_total),
         middle_rows=detail_rows(campus, "Middle School"),
         high_rows=detail_rows(campus, "High School"),
-        volunteer_rows=volunteer_rows(campus),
     )
 
 
@@ -434,7 +417,7 @@ if missing_orgs:
 
 body = """
 <div style="margin:0;padding:0;background:#eef2f7;">
-  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">{students} students &middot; {volunteers} volunteers &middot; Sunday attendance summary</div>
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">{students} students &middot; {leaders} leaders &middot; Sunday attendance summary</div>
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#eef2f7;">
     <tr><td align="center" style="padding:16px 8px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:640px;background:#ffffff;border-radius:10px;overflow:hidden;">
@@ -445,12 +428,21 @@ body = """
         <tr><td style="padding:12px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
             {student_card}
-            {volunteer_card}
+            {leader_card}
             {total_card}
           </table>
         </td></tr>
         {missing_warning}
         {campus_sections}
+        <tr><td style="padding:8px 18px 18px;">
+          <div style="padding:8px 12px;background:#fef3c7;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#78350f;">Leader Attendance</div>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
+            <tr>
+              <td style="padding:10px 12px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#334155;">SM: All Volunteers 2026-2027</td>
+              <td align="right" style="padding:10px 12px;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;">{leaders}</td>
+            </tr>
+          </table>
+        </td></tr>
         <tr><td align="center" style="padding:20px 18px 26px;">
           <a href="{dashboard_url}" style="display:inline-block;padding:13px 20px;background:#2563eb;border-radius:6px;font-family:Arial,sans-serif;font-size:16px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;">View interactive attendance report</a>
           <div style="padding-top:16px;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">Automated Monday report from RockPointe TouchPoint</div>
@@ -461,43 +453,35 @@ body = """
 </div>
 """.format(
     students=student_total,
-    volunteers=volunteer_total,
+    leaders=leader_total,
     date_label=report_date_label,
     student_card=summary_card("Students", student_total, delta_text(student_total, previous_student_total)),
-    volunteer_card=summary_card("Volunteers", volunteer_total, delta_text(volunteer_total, previous_volunteer_total)),
-    total_card=summary_card("Total", grand_total, "Students + volunteers"),
+    leader_card=summary_card("Leaders", leader_total, delta_text(leader_total, previous_leader_total)),
+    total_card=summary_card("Total", grand_total, "Students + leaders"),
     missing_warning=missing_warning,
     campus_sections="".join(campus_section(campus) for campus in campuses),
     dashboard_url=dashboard_url,
 )
 
-subject = "SM Attendance - {}: {} students, {} volunteers".format(
+subject = "SM Attendance - {}: {} students, {} leaders".format(
     subject_date_label,
     student_total,
-    volunteer_total,
+    leader_total,
 )
 
 # ============================================================
-# PREVIEW / SEND
+# SEND
 # ============================================================
 
-if TEST_MODE:
-    print("<p><strong>TEST MODE:</strong> Preview only; no email sent.</p>")
-    print("<p><strong>Subject:</strong> {}</p>".format(escape_html(subject)))
-    print("<p><strong>Recipients:</strong> {} confirmed TouchPoint PeopleIds.</p>".format(
-        len(recipient_people_ids)
-    ))
-    print(body)
-else:
-    recipient_query = "peopleids='{}'".format(
-        ",".join(str(people_id) for people_id in recipient_people_ids)
-    )
-    model.Email(
-        recipient_query,
-        QUEUED_BY,
-        FROM_EMAIL,
-        FROM_NAME,
-        subject,
-        body,
-    )
-    print("<p>Weekly SM attendance report queued for {} recipient(s).</p>".format(len(recipient_people_ids)))
+recipient_query = "peopleids='{}'".format(
+    ",".join(str(people_id) for people_id in recipient_people_ids)
+)
+model.Email(
+    recipient_query,
+    QUEUED_BY,
+    FROM_EMAIL,
+    FROM_NAME,
+    subject,
+    body,
+)
+print("<p>Weekly SM attendance report queued for {} recipient(s).</p>".format(len(recipient_people_ids)))
