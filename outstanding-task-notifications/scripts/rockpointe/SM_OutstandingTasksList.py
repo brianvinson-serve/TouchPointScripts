@@ -25,7 +25,8 @@ else:
 
 # SQL to fetch outstanding tasks
 # Confirmed StatusId values: 2=Pending, 3=Active (Accepted), 4=Declined
-# IsNote=0/NULL filters to tasks only (IsNote=1 = notes; tasks store NULL not 0)
+# IsNote=0 filters to tasks in the 2026-08-13 full profile; retain NULL in the
+# predicate defensively for older/edge records. IsNote=1 is note/history.
 taskSql = """
 SELECT
     tn.*,

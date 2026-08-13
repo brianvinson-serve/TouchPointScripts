@@ -6,3 +6,6 @@ __pycache__/
 *.log
 .venv/
 node_modules/
+data-dictionary-expander/generated/*.sqlite
+data-dictionary-expander/generated/*.sqlite-shm
+data-dictionary-expander/generated/*.sqlite-wal

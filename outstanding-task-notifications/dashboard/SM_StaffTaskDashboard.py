@@ -130,7 +130,8 @@ if where_extra:
 # Outstanding task definition mirrors the SM notification work:
 # - Owner owns declined tasks and unassigned pending/active tasks.
 # - Assignee owns assigned pending/active tasks.
-# - Include IsNote NULL because live tasks store NULL in practice.
+# - Full 2026-08-13 profile found tasks at IsNote=0 and no NULL rows; retain
+#   NULL defensively for older/edge records.
 # - Exclude TouchPoint's noisy New Person Data Entry tasks.
 task_sql = """
 SELECT
