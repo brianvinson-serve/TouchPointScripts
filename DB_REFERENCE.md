@@ -1,5 +1,5 @@
 # TouchPoint Database Reference - RockPointe
-**Last Updated:** 2026-08-13
+**Last Updated:** 2026-08-17
 
 This doc captures confirmed IDs, table structures, and join patterns discovered
 by running queries against the live rockpointe.tpsdb.com instance.
@@ -15,8 +15,10 @@ Structural metadata confirms object/column/key existence. Status/type meanings a
 | ProgId | Name |
 |--------|------|
 | 1109   | Student Ministry (SM) |
+| 1111   | Children's Ministry (CM) |
 | 1130   | CT Admin |
-| 1138   | RP PS Children |
+| 1137   | Reporting (RP) CC Children ONLY Sun AM |
+| 1138   | Reporting (RP) PS Children ONLY Sun AM |
 | 1141   | RP PS Students |
 
 ---
@@ -31,6 +33,27 @@ Structural metadata confirms object/column/key existence. Status/type meanings a
 | 42 | SM Wednesdays |
 | 45 | SM Mission Trips |
 | 108 | SM Admin |
+
+---
+
+## Children's Ministry Sunday Reporting — confirmed 2026-08-17
+
+The clean production boundary for Sunday Children's Ministry attendance is active `CM:` organizations of Type 201 or 207 linked through `DivOrg` to reporting program 1137 (Central) or 1138 (Parker Square), **and** having either a Sunday schedule (`OrgSchedule.SchedDay = 0`) or an actual Sunday meeting in the operational lookback window. Program linkage alone is too broad: the live validation found stale Christmas/event/leader records with no Sunday schedule or recent Sunday meeting. In this boundary, Type 201 is child/classroom attendance and Type 207 is volunteer attendance.
+
+August 16, 2026 was Promotion Sunday and the start of the new school year. Children’s Ministry may have cleaned up or recreated involvements effective that date. Treat 2026-08-16 as the beginning of the Fall 2026 reporting roster: pre-8/16 history is useful for technical validation but is not an apples-to-apples attendance trend baseline. Do not exclude a correctly linked active involvement with a Sunday schedule simply because it has no pre-promotion meeting history.
+
+| Division.Id | Division.Name | Program |
+|-------------|---------------|---------|
+| 14 | CM Special Needs | 1111 Children's Ministry (CM) |
+| 15 | CM Elementary | 1111 Children's Ministry (CM) |
+| 19 | CM Preschool | 1111 Children's Ministry (CM) |
+| 66 | CM Childcare | 1111 Children's Ministry (CM) |
+| 81 | RP CC Children | 1137 Reporting (RP) CC Children ONLY Sun AM |
+| 82 | RP PS Children | 1138 Reporting (RP) PS Children ONLY Sun AM |
+
+The dated discovery evidence is retained at `data-dictionary-expander/exports/2026-08-17/RunScript.xlsx`. Four-week validation evidence is `data-dictionary-expander/exports/2026-08-17/RPC_ChildrenFourWeekAttendanceValidation.xlsx`; the audited 93-involvement roster and findings are under `data-dictionary-expander/reports/2026-08-17/`.
+
+Do not include rows solely because Angela Cheshire or Jennifer Schmitz is a member, or because an unrelated involvement name contains “kids” or “children.” Explicitly exclude the incorrectly linked `SM: PS Sunday Morning Volunteers 2026-2027` row. An organization can have multiple meetings on one Sunday (the PS Welcome Team had three on 2026-08-16), so weekly organization attendance must sum all non-canceled, non-`DidNotMeet` meetings for that organization/date rather than selecting `TOP 1` latest meeting.
 
 ---
 
@@ -62,6 +85,10 @@ Links organizations to divisions.
 Columns: `DivId`, `OrgId`, `id`
 
 Confirmed 2026-08-13: composite primary key is (`DivId`, `OrgId`). Declared foreign keys are `DivId -> Division.Id` and `OrgId -> Organizations.OrganizationId`. The lowercase `id` column exists but is not part of the declared primary key.
+
+### Campus lookup
+
+The campus table is `lookup.Campus`, not `dbo.Campus`. Join organization campus metadata with `lookup.Campus.Id = Organizations.CampusId`. Using `dbo.Campus` causes `Invalid object name 'dbo.Campus'` in RPC TouchPoint.
 
 ```sql
 -- Orgs in SM program

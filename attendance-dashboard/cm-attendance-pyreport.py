@@ -8,18 +8,36 @@ from datetime import datetime, timedelta
 # Modeled directly on sm-attendance-pyreport.py. Scope confirmed live
 # 2026-08-17 via a read-only discovery query
 # (data-dictionary-expander/sql/focused/RPC_ChildrenInvolvementDiscovery.sql)
-# and a 4-week Sunday attendance pull, both exported from TouchPoint and
-# reviewed on the Mac. Reporting scope = Program 1111 (Children's Ministry)
-# involvements linked to the RP Sunday-AM reporting divisions:
-#   Division 81 = RP CC Children (Program 1137, Central)
-#   Division 82 = RP PS Children (Program 1138, Parker Square)
-# This automatically EXCLUDES CM Childcare (Div 66), CM Events (Div 112),
-# "CM: Embrace Families" (small group, no Sun AM reporting link), and
-# volunteer scheduler/admin orgs that carry no reporting division.
+# and an independently validated 4-week Sunday attendance pull
+# (data-dictionary-expander/sql/focused/RPC_ChildrenFourWeekAttendanceValidation.sql),
+# both exported from TouchPoint and reviewed on the Mac. See
+# data-dictionary-expander/reports/2026-08-17/rpc-children-four-week-validation-summary.md
+# for the full 93-involvement audited roster and findings.
 #
-# "CM: All Special Needs Volunteers" is confirmed live as a stale rollup
-# organization -- zero attendance every week across a 4-week pull despite
-# being in reporting scope -- so it is explicitly excluded by name below.
+# VALIDATED PRODUCTION FILTER (all conditions required):
+#   1. OrganizationStatusId = 30 (active)
+#   2. Name begins with "CM:"
+#   3. OrganizationTypeId 201 (children/classroom) or 207 (volunteers)
+#   4. Linked via DivOrg -> Division to reporting Program 1137 (Central,
+#      Division 81 = RP CC Children) or 1138 (Parker Square, Division 82 =
+#      RP PS Children)
+#   5. Has a Sunday schedule (OrgSchedule.SchedDay = 0) OR an actual Sunday
+#      meeting in the lookback window
+#
+# Condition 5 is the piece a naive Program-1111-linkage query misses: it is
+# what correctly excludes ten stale/seasonal records that ARE linked to the
+# reporting programs but have no real Sunday presence -- e.g. Christmas Eve
+# 2025 classes, "CM: All Special Needs Volunteers" (confirmed dead rollup,
+# zero attendance every week), "CM: CC Ignite Kids Fall 2026 Volunteers",
+# "CM: CC Preschool Small Group/Student Leaders", a duplicate PS 8:30
+# Volunteers Elementary org, and "CM: Volunteers Encompass". It also
+# correctly excludes "CM: Embrace Families" (small group, no Sunday
+# schedule, no Sunday meeting -- not a Sunday check-in involvement).
+#
+# Special Needs (Embrace) classroom + volunteer involvements ARE included:
+# CC/PS Special Needs Kids and Volunteers Special Needs at both service
+# times, both campuses -- they carry real Sunday schedules and weekly
+# attendance.
 #
 # Parameters from URL (?StartDate=2026-01-01&EndDate=2026-07-08 etc.)
 # ============================================================
@@ -59,7 +77,7 @@ DECLARE @EndDate          DATE         = '{end}'
 DECLARE @CampusFilter     VARCHAR(20)  = '{campus}'
 DECLARE @CCPrefix         VARCHAR(10)  = 'CM: CC '
 DECLARE @PSPrefix         VARCHAR(10)  = 'CM: PS '
-DECLARE @ExcludedOrgName  VARCHAR(100) = 'CM: All Special Needs Volunteers'
+DECLARE @ScheduleLookbackDays INT      = 28
 
 SELECT
     Campus = CASE
@@ -85,7 +103,7 @@ JOIN dbo.Meetings m
 
 WHERE
     o.OrganizationStatusId = 30
-    AND o.OrganizationName <> @ExcludedOrgName
+    AND o.OrganizationName LIKE 'CM:%'
     AND (
         o.OrganizationName LIKE @CCPrefix + '%'
         OR o.OrganizationName LIKE @PSPrefix + '%'
@@ -108,6 +126,24 @@ WHERE
         FROM dbo.DivOrg dr
         WHERE dr.OrgId = o.OrganizationId
           AND dr.DivId IN (@CCReportingDivId, @PSReportingDivId)
+    )
+    -- Validated 2026-08-17: reporting-program linkage alone is too broad.
+    -- Require a real Sunday presence -- either a standing Sunday schedule
+    -- or an actual Sunday meeting in the lookback window -- to exclude
+    -- stale/seasonal records (Christmas Eve classes, dead rollup orgs,
+    -- one-off event volunteer lists) that are still linked to the
+    -- reporting program but no longer represent live Sunday attendance.
+    AND (
+        EXISTS (
+            SELECT 1 FROM dbo.OrgSchedule os
+            WHERE os.OrganizationId = o.OrganizationId AND os.SchedDay = 0
+        )
+        OR EXISTS (
+            SELECT 1 FROM dbo.Meetings sm
+            WHERE sm.OrganizationId = o.OrganizationId
+              AND CAST(sm.MeetingDate AS DATE) >= DATEADD(DAY, -@ScheduleLookbackDays, CAST(GETDATE() AS DATE))
+              AND DATEPART(dw, sm.MeetingDate) = 1
+        )
     )
 
 ORDER BY Campus, PersonType, OrganizationName, MeetingDate
