@@ -395,6 +395,84 @@ ORDER BY o.OrganizationName
 
 ---
 
+## Registrations (Online Registration / RegQuestion / RegAnswer) — confirmed 2026-08-17
+
+Registration data lives in its own table set, separate from `Meetings`/`Attendance`. Confirmed live against the "SM: Man Up Meal Sign Up 2026-2027" registration (OrganizationId 4053).
+
+### Table roles
+
+| Table | Role |
+|---|---|
+| `Organizations` | The event/org itself. `RegistrationTypeId`, `RegistrationTitle`, `RegistrationClosed` flag whether/how registration is configured on that org. |
+| `Registration` | One row per registration transaction. `RegistrationId` is a `uniqueidentifier` (GUID) — **not** a small int. Tied to `OrganizationId` and the registering `PeopleId`. |
+| `RegPeople` | The person/people attached to a given `Registration` (covers group signups where one registration includes multiple people). FK: `RegPeople.RegistrationId -> Registration.RegistrationId`. |
+| `RegQuestion` | The custom questions configured on that org's registration form. FK: `RegQuestion.OrganizationId -> Organizations.OrganizationId`. Has `Label`, `QuestionTypeId`, `IsRequired`, and `Options` (see below). |
+| `RegAnswer` | The actual answers people gave. FK: `RegAnswer.RegQuestionId -> RegQuestion.RegQuestionId`, `RegAnswer.RegPeopleId -> RegPeople.RegPeopleId`. `AnswerValue` holds the answer (see JSON gotcha below). |
+
+### URL → ID mapping
+
+TouchPoint's public registration page URL pattern is `https://{site}.tpsdb.com/OnlineReg/{OrganizationId}` — the number in that URL is the **OrganizationId**, not a `Registration.RegistrationId` (which is a GUID and would never render as a short decimal in a URL). Confirmed: `/OnlineReg/4053` → `Organizations.OrganizationId = 4053`, `OrganizationName = "SM: Man Up Meal Sign Up 2026-2027"`, `RegistrationTypeId = 26`.
+
+### JSON-encoded answer/option data (multi-select questions)
+
+For a multi-select `RegQuestion` (e.g. "choose a night" checkboxes), both of the following are stored as **JSON strings**, not plain delimited text — do not assume newline/semicolon splitting without checking first:
+
+- `RegAnswer.AnswerValue` — JSON array of the option strings the person picked, e.g. `["9/16 Nacho Bar","4/14 Hot Dogs"]`. A person can select more than one option; don't assume one answer per person per question.
+- `RegQuestion.Options` — JSON array of option objects describing the full picklist offered on the form, e.g. `[{"Name":null,"Value":"8/26","Text":"8/26 Hot Dogs (Hot dogs, buns, condiments, chips)","Lookup":null,"Fee":null,"MeetingId":null,"Limit":1,"InvId":null,"Other":false,"SkipToId":null,"Status":null,"Count":null}, ...]`. Use each object's `Text` (or `Value`) field to get the option's display string — do not treat the raw field as one-option-per-line text.
+
+Both fields need `json.loads` (or equivalent) before parsing; a plain-line-split fallback is reasonable defensive coding but should not be the primary path.
+
+### Man Up Meal Sign-Up — confirmed IDs
+
+| Item | Value |
+|---|---|
+| OrganizationId | 4053 |
+| OrganizationName | SM: Man Up Meal Sign Up 2026-2027 |
+| RegistrationTypeId | 26 |
+| RegistrationTitle | Man Up Meal Sign-Up 2026-2027 |
+| RegQuestionId — "Enter your information" | c2cd7305-669e-478f-a03e-990f4ccf7cfd |
+| RegQuestionId — "Please choose a night to lead a meal." | fd1504b9-4cfd-4252-a0f3-f1a34c517c4d |
+
+All confirmed claimed nights for this registration land on a Wednesday, consistent with SM Wednesdays (Division 42) — this event tracks "bring food" as a Wednesday-night meal slot claim, not a free-text food item.
+
+### Reusable SQL
+
+```sql
+-- Confirm an OrganizationId belongs to a registration and show its title
+SELECT OrganizationId, OrganizationName, RegistrationTypeId, RegistrationTitle
+FROM dbo.Organizations
+WHERE OrganizationId = @OrgId
+
+-- List the registration questions configured for an org (find RegQuestionId + Options)
+SELECT RegQuestionId, [Order], Label, QuestionTypeId, IsRequired, Options
+FROM dbo.RegQuestion
+WHERE OrganizationId = @OrgId
+ORDER BY [Order]
+
+-- Pull registrants + their raw (possibly JSON) answer for a given question
+SELECT
+    p.Name, p.CellPhone, p.EmailAddress,
+    r.CreatedDate AS RegisteredOn,
+    ra.AnswerValue AS RawAnswer
+FROM dbo.Registration r
+JOIN dbo.RegPeople rp ON rp.RegistrationId = r.RegistrationId
+JOIN dbo.RegAnswer ra ON ra.RegPeopleId = rp.RegPeopleId
+                     AND ra.RegQuestionId = @RegQuestionId
+JOIN dbo.People p ON p.PeopleId = r.PeopleId
+WHERE r.OrganizationId = @OrgId
+ORDER BY p.Name
+```
+
+### Pitfall: GUID literal quoting
+
+Pasting a `uniqueidentifier` literal into TouchPoint's SQL Script editor can trigger `Conversion failed when converting from a character string to uniqueidentifier` if the editor's rich-text box auto-converts straight quotes (`'`) into curly/smart quotes (`'`/`'`) on paste — SQL Server can't parse a string literal wrapped in curly quotes. If a GUID-literal query fails this way, retype the quote marks manually instead of pasting from a source with autocorrect (Word, Notes, some browsers).
+
+### Deployed report script
+
+`meal-signup-report/SM_ManUpMealSignUpReport.py` (this repo) — read-only TouchPoint Python Script that reports signed-up nights (one row per claimed night, duplicate nights per person flagged) and diffs claimed nights against `RegQuestion.Options` to list unclaimed nights. See that folder's README for deployment steps and confirmed IDs.
+
+---
+
 ## Special Content - Deployed Scripts
 
 | Tab | Name | Status |
