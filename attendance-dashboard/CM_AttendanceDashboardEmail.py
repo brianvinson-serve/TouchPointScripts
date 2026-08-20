@@ -2,15 +2,26 @@
 #
 # PURPOSE:
 # - Sends a mobile-friendly report each Monday for the immediately preceding Sunday.
-# - Compares headline and campus totals with the Sunday before that.
+# - Compares headline and campus totals with the Sunday before that, and shows
+#   a 6-week rolling average alongside every current-Sunday number.
 # - Lists current-Sunday kid attendance by campus and bucket (Preschool,
-#   Elementary, Special Needs) and volunteer attendance by campus.
+#   Elementary, Special Needs), in the same age order confirmed for the
+#   interactive dashboard, and volunteer attendance by campus.
 # - Flags active Sunday reporting organizations with no meeting row for the
 #   report date.
 #
 # MODELED ON: SM_AttendanceDashboardEmail.py (Student Ministry). Same shape,
 # same email-safe HTML approach (model.Email, no saved draft / template
 # dependency), same missing-meeting warning pattern.
+#
+# 2026-08-19: this script's query/classification logic is intentionally kept
+# in sync BY HAND with attendance-dashboard/cm-attendance-pyreport.py (the
+# interactive dashboard). A live spike confirmed model.CallScript(...) does
+# not return that script's rendered output in a usable form here (came back
+# empty), so calling the dashboard for data and parsing its output was not
+# viable -- see attendance-dashboard/BACKLOG.md for the finding. Any future
+# fix to the dashboard's filter, classification, ordering, or org overrides
+# must be re-applied here too.
 #
 # SCOPE CONFIRMED LIVE 2026-08-17 (validated production filter -- see
 # data-dictionary-expander/reports/2026-08-17/rpc-children-four-week-validation-summary.md
@@ -34,6 +45,14 @@
 # - Special Needs (Embrace) classroom + volunteer involvements ARE included:
 #   CC/PS Special Needs Kids and Volunteers Special Needs at both service
 #   times, both campuses -- real Sunday schedules, real weekly attendance.
+# - Kindergarten is classified as Elementary, not Preschool (confirmed by
+#   Brian 2026-08-19).
+# - Central Welcome Team reporting org, confirmed by Angela 2026-08-19: org
+#   3587 (CM: CC Welcome Team Scheduler) is used instead of the newer
+#   4026/4027 ("...Volunteers Welcome Team 2026-2027") pair, which exist but
+#   had no meeting logged as of 2026-08-16. 3587 bypasses the normal
+#   reporting-division/Sunday-schedule checks via an explicit override; see
+#   @CentralWelcomeTeamOrgId below.
 #
 # RECIPIENTS -- STATUS AS OF 2026-08-17:
 # Marlene's request came in copying Angela Cheshire (Children's Ministry
@@ -47,6 +66,11 @@
 #
 # DEPLOYMENT: Admin > Advanced > Special Content > Python Scripts
 # File name should be: CM_AttendanceDashboardEmail
+#
+# TESTING: set PREVIEW_MODE = True below, save, and run -- the report prints
+# to the screen with a "PREVIEW MODE" banner and no model.Email call is made.
+# Set PREVIEW_MODE = False (and save) before a real send or before scheduling
+# to MorningBatch.
 #
 # SCHEDULING (only after a controlled live send succeeds AND Angela/Jennifer
 # have confirmed scope):
@@ -62,6 +86,10 @@ global model, q
 # ============================================================
 # CONFIGURATION
 # ============================================================
+
+# Flip to True, save, and run to preview the report without sending any
+# email. Flip back to False (and save) before a real send.
+PREVIEW_MODE = True
 
 FROM_EMAIL = "childrensministry@rockpointechurch.org"  # TODO confirm exact CM send-as address before first live send
 FROM_NAME = "RockPointe Children's Ministry"
@@ -82,6 +110,16 @@ KIDS_TYPE_ID = 201
 VOLUNTEER_TYPE_ID = 207
 ORGANIZATION_STATUS_ACTIVE = 30
 
+# Central Welcome Team reporting org (see header note): included via an
+# explicit override; 4026/4027 are excluded outright so Central Welcome Team
+# never double-counts once those newer orgs start logging meetings.
+CENTRAL_WELCOME_TEAM_ORG_ID = 3587
+EXCLUDED_ORG_IDS = (4026, 4027)
+
+# How many trailing Sundays (including the report Sunday) feed the 6-week
+# average shown next to every current-Sunday number.
+AVERAGE_WINDOW_WEEKS = 6
+
 # Parameterized full dashboard deployed in TouchPoint.
 DASHBOARD_SCRIPT_NAME = "cm-attendance-pyreport"
 
@@ -95,9 +133,14 @@ if days_since_sunday == 0:
     days_since_sunday = 7
 report_date = today - timedelta(days=days_since_sunday)
 comparison_date = report_date - timedelta(days=7)
+# 6 Sundays inclusive of report_date (report_date and the 5 before it). This
+# window already covers comparison_date, so one query serves both the
+# week-over-week delta and the 6-week average.
+window_start = report_date - timedelta(weeks=AVERAGE_WINDOW_WEEKS - 1)
 
 report_date_sql = report_date.strftime("%Y-%m-%d")
 comparison_date_sql = comparison_date.strftime("%Y-%m-%d")
+window_start_sql = window_start.strftime("%Y-%m-%d")
 report_date_label = report_date.strftime("%A, %B %d, %Y").replace(" 0", " ")
 subject_date_label = report_date.strftime("%b %d").replace(" 0", " ")
 
@@ -115,10 +158,11 @@ DECLARE @KidsTypeId       INT  = {kids_type_id}
 DECLARE @VolunteerTypeId  INT  = {volunteer_type_id}
 DECLARE @ActiveStatusId   INT  = {active_status_id}
 DECLARE @ReportDate       DATE = '{report_date}'
-DECLARE @ComparisonDate   DATE = '{comparison_date}'
+DECLARE @WindowStart      DATE = '{window_start}'
 DECLARE @CCPrefix         VARCHAR(10)  = 'CM: CC '
 DECLARE @PSPrefix         VARCHAR(10)  = 'CM: PS '
 DECLARE @ScheduleLookbackDays INT      = 28
+DECLARE @CentralWelcomeTeamOrgId INT   = {central_welcome_team_org_id}
 
 SELECT
     Campus = CASE
@@ -138,22 +182,26 @@ SELECT
 FROM dbo.Organizations o
 LEFT JOIN dbo.Meetings m
     ON m.OrganizationId = o.OrganizationId
-   AND CAST(m.MeetingDate AS DATE) IN (@ReportDate, @ComparisonDate)
+   AND CAST(m.MeetingDate AS DATE) BETWEEN @WindowStart AND @ReportDate
 WHERE o.OrganizationStatusId = @ActiveStatusId
   AND o.OrganizationName LIKE 'CM:%'
   AND (o.OrganizationName LIKE @CCPrefix + '%' OR o.OrganizationName LIKE @PSPrefix + '%')
   AND o.OrganizationTypeId IN (@KidsTypeId, @VolunteerTypeId)
+  AND o.OrganizationId NOT IN ({excluded_org_ids})
   AND EXISTS (
       SELECT 1
       FROM dbo.DivOrg dp
       JOIN dbo.Division d ON d.Id = dp.DivId
       WHERE dp.OrgId = o.OrganizationId AND d.ProgId = @ProgramId
   )
-  AND EXISTS (
-      SELECT 1
-      FROM dbo.DivOrg dr
-      WHERE dr.OrgId = o.OrganizationId
-        AND dr.DivId IN (@CCReportingDivId, @PSReportingDivId)
+  AND (
+      EXISTS (
+          SELECT 1
+          FROM dbo.DivOrg dr
+          WHERE dr.OrgId = o.OrganizationId
+            AND dr.DivId IN (@CCReportingDivId, @PSReportingDivId)
+      )
+      OR o.OrganizationId = @CentralWelcomeTeamOrgId
   )
   -- Validated 2026-08-17: reporting-program linkage alone is too broad.
   -- Require a real Sunday presence -- a standing Sunday schedule or an
@@ -171,6 +219,11 @@ WHERE o.OrganizationStatusId = @ActiveStatusId
             AND CAST(sm.MeetingDate AS DATE) >= DATEADD(DAY, -@ScheduleLookbackDays, CAST(GETDATE() AS DATE))
             AND DATEPART(dw, sm.MeetingDate) = 1
       )
+      -- 3587 has no standing OrgSchedule row (it's a "Scheduler" org, not a
+      -- classroom/attendance org with a fixed recurring slot); bypass the
+      -- two checks above for this one confirmed org rather than let it
+      -- silently drop out.
+      OR o.OrganizationId = @CentralWelcomeTeamOrgId
   )
 ORDER BY Campus, PersonType, OrganizationName, MeetingDate
 """.format(
@@ -181,7 +234,9 @@ ORDER BY Campus, PersonType, OrganizationName, MeetingDate
     volunteer_type_id=VOLUNTEER_TYPE_ID,
     active_status_id=ORGANIZATION_STATUS_ACTIVE,
     report_date=report_date_sql,
-    comparison_date=comparison_date_sql,
+    window_start=window_start_sql,
+    central_welcome_team_org_id=CENTRAL_WELCOME_TEAM_ORG_ID,
+    excluded_org_ids=",".join(str(org_id) for org_id in EXCLUDED_ORG_IDS),
 )
 
 rows = list(q.QuerySql(ATTENDANCE_SQL))
@@ -192,9 +247,10 @@ if len(set(recipient_people_ids)) != len(recipient_people_ids):
 
 # ============================================================
 # AGE-GROUP / BUCKET CLASSIFICATION
-# Confirmed against the full live 2026-08-17 involvement export (125 active
-# CM orgs in reporting scope). Match order matters: Special Needs is checked
-# before Preschool/Elementary.
+# Mirrored from cm-attendance-pyreport.py (see header note). Confirmed
+# against the full live 2026-08-17 involvement export (125 active CM orgs in
+# reporting scope). Match order matters: Special Needs, then
+# Kindergarten/Grade (Elementary), then Preschool.
 # ============================================================
 
 _PRESCHOOL_KEYWORDS = (
@@ -206,7 +262,6 @@ _PRESCHOOL_KEYWORDS = (
     "toddler",
     "prek",
     "pre-k",
-    "kindergarten",
     "nursery",
 )
 
@@ -215,11 +270,122 @@ def classify_age_group(name):
     lname = name.lower()
     if "special needs" in lname:
         return "Special Needs"
+    if "kindergarten" in lname or "grade" in lname:
+        return "Elementary"
     if any(k in lname for k in _PRESCHOOL_KEYWORDS):
         return "Preschool"
-    if "grade" in lname:
-        return "Elementary"
     return "Other"
+
+
+# Display order within each campus/bucket, confirmed by Brian 2026-08-19 and
+# mirrored verbatim from cm-attendance-pyreport.py's _AGE_ORDER tables. Keys
+# are org names with the "CM: CC "/"CM: PS " campus prefix stripped. Any org
+# not found here falls back to alphabetical -- see age_rank() below.
+_CENTRAL_PRESCHOOL_ORDER = [
+    "9:00a Infants", "10:45 AM Infants",
+    "9:00a Crawlers", "10:45 AM Crawlers",
+    "9:00a Walking-18 Months", "10:45 AM Walking-18 Months",
+    "9:00a 18-24 Months", "10:45 AM 18-24 Months",
+    "9:00a 2 Years", "10:45 AM 2 Years",
+    "9:00a 3 Years", "10:45 AM 3 Years",
+    "9:00a PreK (4-5 Years)", "10:45 AM PreK (4-5 Years)",
+]
+
+_CENTRAL_ELEMENTARY_ORDER = [
+    "9:00a Kindergarten", "10:45 AM Kindergarten",
+    "9:00a 1st Grade", "10:45 AM 1st Grade",
+    "9:00a 2nd Grade", "10:45 AM 2nd Grade",
+    "9:00a 3rd Grade Boys", "10:45 AM 3rd Grade Boys",
+    "9:00a 3rd Grade Girls", "10:45 AM 3rd Grade Girls",
+    "9:00a 4th Grade Boys", "10:45 AM 4th Grade Boys",
+    "9:00a 4th Grade Girls", "10:45 AM 4th Grade Girls",
+    "9:00a 5th Grade Boys", "10:45 AM 5th Grade Boys",
+    "9:00a 5th Grade Girls", "10:45 AM 5th Grade Girls",
+]
+
+_PS_PRESCHOOL_ORDER = [
+    "8:30 Infants (Birth-Crawling)", "9:45 Infants (Birth-Crawling)", "11:15 Infants (Birth-Crawling)",
+    "8:30 Toddlers (Walking-24 mo)", "9:45 Toddlers (Walking-24 mo)", "11:15 Toddlers (Walking-24 mo)",
+    "8:30 2 Years", "9:45 2 Years", "11:15 2 Years",
+    "8:30 3 Years", "9:45 3 Years", "11:15 3 Years",
+    "8:30 PreK", "9:45 PreK", "11:15 PreK",
+]
+
+_PS_ELEMENTARY_ORDER = [
+    "8:30 Kindergarten", "9:45 Kindergarten", "11:15 Kindergarten",
+    "8:30 1st Grade", "9:45 1st Grade", "11:15 1st Grade",
+    "8:30 2nd Grade", "9:45 2nd Grade", "11:15 2nd Grade",
+    "8:30 3rd Grade Boys", "9:45 3rd Grade Boys", "11:15 3rd Grade Boys",
+    "8:30 3rd Grade Girls", "9:45 3rd Grade Girls", "11:15 3rd Grade Girls",
+    "8:30 4th Grade Boys", "9:45 4th Grade Boys", "11:15 4th Grade Boys",
+    "8:30 4th Grade Girls", "9:45 4th Grade Girls", "11:15 4th Grade Girls",
+    "8:30 5th Grade Boys", "9:45 5th Grade Boys", "11:15 5th Grade Boys",
+    "8:30 5th Grade Girls", "9:45 5th Grade Girls", "11:15 5th Grade Girls",
+]
+
+_AGE_ORDER = {
+    ("Central", "Preschool"): _CENTRAL_PRESCHOOL_ORDER,
+    ("Central", "Elementary"): _CENTRAL_ELEMENTARY_ORDER,
+    ("Parker Square", "Preschool"): _PS_PRESCHOOL_ORDER,
+    ("Parker Square", "Elementary"): _PS_ELEMENTARY_ORDER,
+}
+
+_CAMPUS_PREFIX_RE = re.compile(r"^CM: (CC|PS) ")
+
+
+def age_rank(campus, bucket, org_name):
+    order = _AGE_ORDER.get((campus, bucket))
+    if not order:
+        return None
+    short = _CAMPUS_PREFIX_RE.sub("", org_name)
+    try:
+        return order.index(short)
+    except ValueError:
+        return None
+
+
+# Mirrored from cm-attendance-pyreport.py's classify_volunteer_bucket/sort:
+# groups volunteer rows by type (Nursery/Kinder -> Elementary -> Special
+# Needs -> Welcome Team) then by service time, instead of plain alphabetical.
+def classify_volunteer_bucket(name):
+    lname = name.lower()
+    if "special needs" in lname:
+        return "Special Needs"
+    if "nursery" in lname or "kinder" in lname:
+        return "Nursery/Kinder"
+    if "elementary" in lname:
+        return "Elementary"
+    if "welcome team" in lname:
+        return "Welcome Team"
+    return "Other"
+
+
+_VOLUNTEER_BUCKET_ORDER = {"Nursery/Kinder": 0, "Elementary": 1, "Special Needs": 2, "Welcome Team": 3}
+_TIME_RE = re.compile(r"(\d{1,2}):(\d{2})")
+
+
+def volunteer_time_minutes(name):
+    match = _TIME_RE.search(name)
+    if not match:
+        return 9999
+    return int(match.group(1)) * 60 + int(match.group(2))
+
+
+# Mirrored from cm-attendance-pyreport.py's prettyLabel(): CM staff's
+# TouchPoint org-naming conventions are inconsistent ("9:00a" vs "10:45 AM"
+# vs "9:00 a", "Volunteer" vs "Volunteers", a trailing school-year suffix).
+# This only cleans up the display label -- age_rank/bucket/sort logic and
+# the raw OrganizationName elsewhere are untouched.
+def pretty_label(name):
+    name = re.sub(
+        r"^(\d{1,2}):(\d{2})\s*a\.?m?\.?\s*",
+        lambda m: "{}:{} AM ".format(m.group(1), m.group(2)),
+        name,
+        flags=re.IGNORECASE,
+    )
+    name = re.sub(r"\bVolunteers?\b\s*", "", name, flags=re.IGNORECASE)
+    name = re.sub(r"\s*\d{4}-\d{4}\s*$", "", name)
+    return re.sub(r"\s{2,}", " ", name).strip()
 
 
 # ============================================================
@@ -285,6 +451,35 @@ def total_for(date_string, campus=None, person_type=None, bucket=None):
     return total(rows_for(date_string, campus, person_type, bucket))
 
 
+def weekly_totals(campus=None, person_type=None, bucket=None, org_id=None):
+    """{date_string: summed_attendance} across the fetched window, for every
+    Sunday that actually has a logged meeting matching the filters. Weeks
+    with no meeting are omitted entirely rather than counted as zero, so a
+    newly created org isn't penalized for weeks before it existed."""
+    by_date = {}
+    for row in rows:
+        date_string = row_date(row)
+        if not date_string:
+            continue
+        if campus and str(row.Campus or "") != campus:
+            continue
+        if person_type and str(row.PersonType or "") != person_type:
+            continue
+        if bucket and classify_age_group(str(row.OrganizationName or "")) != bucket:
+            continue
+        if org_id is not None and as_int(row.OrganizationId) != org_id:
+            continue
+        by_date[date_string] = by_date.get(date_string, 0) + as_int(row.Attendance)
+    return by_date
+
+
+def avg_6wk(campus=None, person_type=None, bucket=None, org_id=None):
+    totals = weekly_totals(campus, person_type, bucket, org_id)
+    if not totals:
+        return 0
+    return round(sum(totals.values()) / len(totals))
+
+
 def delta_text(current, previous):
     delta = current - previous
     if delta > 0:
@@ -292,6 +487,10 @@ def delta_text(current, previous):
     if delta < 0:
         return "&#9660; {} from last Sunday".format(abs(delta))
     return "No change from last Sunday"
+
+
+def with_avg_caption(delta, avg):
+    return "{} &middot; 6-wk avg: {}".format(delta, avg)
 
 
 def short_org_name(name):
@@ -307,6 +506,9 @@ leader_total = total_for(report_date_sql, person_type="Volunteers")
 grand_total = kids_total + leader_total
 previous_kids_total = total_for(comparison_date_sql, person_type="Kids")
 previous_leader_total = total_for(comparison_date_sql, person_type="Volunteers")
+kids_avg = avg_6wk(person_type="Kids")
+leader_avg = avg_6wk(person_type="Volunteers")
+grand_avg = avg_6wk()
 
 # LEFT JOIN produces one row with MeetingDate NULL for an active Sunday org that has
 # neither current nor comparison attendance. An org with comparison attendance but no
@@ -339,35 +541,74 @@ def summary_card(label, value, comparison):
     """.format(label=label, value=value, comparison=comparison)
 
 
-def detail_rows(campus, bucket):
-    selected = rows_for(report_date_sql, campus, "Kids", bucket)
-    grouped = {}
-    for row in selected:
-        name = short_org_name(str(row.OrganizationName or ""))
-        grouped[name] = grouped.get(name, 0) + as_int(row.Attendance)
+def column_header_row():
+    return """
+    <tr>
+      <td style="padding:0 12px;"></td>
+      <td align="right" style="padding:0 12px;font-family:Arial,sans-serif;font-size:10px;line-height:16px;font-weight:bold;color:#94a3b8;text-transform:uppercase;letter-spacing:.3px;">This Sun</td>
+      <td align="right" width="66" style="padding:0 12px;font-family:Arial,sans-serif;font-size:10px;line-height:16px;font-weight:bold;color:#94a3b8;text-transform:uppercase;letter-spacing:.3px;">6-wk avg</td>
+    </tr>
+    """
 
-    html_rows = ""
-    for name in sorted(grouped):
-        html_rows += """
-        <tr>
-          <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#334155;">{label}</td>
-          <td align="right" style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;">{value}</td>
-        </tr>
-        """.format(label=escape_html(name), value=grouped[name])
 
-    bucket_total = total(selected)
-    html_rows += """
+def detail_row_html_raw(label_html, value, avg):
+    """label_html must already be HTML-safe (pre-escaped) -- used when a row's
+    label is built from more than one escaped field, e.g. campus + org name."""
+    return """
+    <tr>
+      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#334155;">{label}</td>
+      <td align="right" style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;">{value}</td>
+      <td align="right" width="66" style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#94a3b8;">{avg}</td>
+    </tr>
+    """.format(label=label_html, value=value, avg=avg)
+
+
+def detail_row_html(label, value, avg):
+    return detail_row_html_raw(escape_html(label), value, avg)
+
+
+def total_row_html(label, value, avg):
+    return """
     <tr>
       <td style="padding:10px 12px;background:#e8f1fb;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#12355b;">{label} total</td>
       <td align="right" style="padding:10px 12px;background:#e8f1fb;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#12355b;">{value}</td>
+      <td align="right" width="66" style="padding:10px 12px;background:#e8f1fb;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#4a6b8a;">{avg}</td>
     </tr>
-    """.format(label=bucket, value=bucket_total)
+    """.format(label=escape_html(label), value=value, avg=avg)
+
+
+def detail_rows(campus, bucket):
+    selected = rows_for(report_date_sql, campus, "Kids", bucket)
+    orgs = {}
+    for row in selected:
+        org_id = as_int(row.OrganizationId)
+        full_name = str(row.OrganizationName or "")
+        entry = orgs.setdefault(
+            org_id,
+            {"full_name": full_name, "short_name": short_org_name(full_name), "count": 0},
+        )
+        entry["count"] += as_int(row.Attendance)
+
+    def sort_key(org_id):
+        entry = orgs[org_id]
+        rank = age_rank(campus, bucket, entry["full_name"])
+        return (rank if rank is not None else 9999, entry["short_name"])
+
+    html_rows = column_header_row()
+    for org_id in sorted(orgs, key=sort_key):
+        entry = orgs[org_id]
+        html_rows += detail_row_html(pretty_label(entry["short_name"]), entry["count"], avg_6wk(org_id=org_id))
+
+    bucket_total = total(selected)
+    bucket_avg = avg_6wk(campus=campus, person_type="Kids", bucket=bucket)
+    html_rows += total_row_html(bucket, bucket_total, bucket_avg)
     return html_rows
 
 
 def campus_section(campus):
     kids = total_for(report_date_sql, campus, "Kids")
     previous_total = total_for(comparison_date_sql, campus, "Kids")
+    campus_avg = avg_6wk(campus=campus, person_type="Kids")
     return """
     <tr><td style="padding:24px 18px 8px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -375,7 +616,7 @@ def campus_section(campus):
           <td style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">{campus}</td>
           <td align="right" style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">{kids}</td>
         </tr>
-        <tr><td colspan="2" style="padding-top:3px;font-family:Arial,sans-serif;font-size:14px;line-height:21px;color:#475569;">{kids} kids &middot; {delta}</td></tr>
+        <tr><td colspan="2" style="padding-top:3px;font-family:Arial,sans-serif;font-size:14px;line-height:21px;color:#475569;">{kids} kids &middot; {delta_and_avg}</td></tr>
       </table>
     </td></tr>
     <tr><td style="padding:0 18px 8px;">
@@ -393,7 +634,7 @@ def campus_section(campus):
     """.format(
         campus=campus,
         kids=kids,
-        delta=delta_text(kids, previous_total),
+        delta_and_avg=with_avg_caption(delta_text(kids, previous_total), campus_avg),
         preschool_rows=detail_rows(campus, "Preschool"),
         elementary_rows=detail_rows(campus, "Elementary"),
         special_needs_rows=detail_rows(campus, "Special Needs"),
@@ -401,22 +642,29 @@ def campus_section(campus):
 
 
 def leader_rows():
-    grouped = {}
+    orgs = {}
     for row in rows_for(report_date_sql, person_type="Volunteers"):
+        org_id = as_int(row.OrganizationId)
         campus = str(row.Campus or "")
-        name = short_org_name(str(row.OrganizationName or ""))
-        key = (campus, name)
-        grouped[key] = grouped.get(key, 0) + as_int(row.Attendance)
+        full_name = str(row.OrganizationName or "")
+        entry = orgs.setdefault(
+            org_id,
+            {"campus": campus, "full_name": full_name, "short_name": short_org_name(full_name), "count": 0},
+        )
+        entry["count"] += as_int(row.Attendance)
 
-    html_rows = ""
-    for key in sorted(grouped):
-        campus, name = key
-        html_rows += """
-        <tr>
-          <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#334155;">{campus} &middot; {name}</td>
-          <td align="right" style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;">{value}</td>
-        </tr>
-        """.format(campus=escape_html(campus), name=escape_html(name), value=grouped[key])
+    def sort_key(org_id):
+        entry = orgs[org_id]
+        bucket_rank = _VOLUNTEER_BUCKET_ORDER.get(classify_volunteer_bucket(entry["full_name"]), 4)
+        return (entry["campus"], bucket_rank, volunteer_time_minutes(entry["full_name"]), entry["short_name"])
+
+    html_rows = column_header_row()
+    for org_id in sorted(orgs, key=sort_key):
+        entry = orgs[org_id]
+        # Escape campus/name individually so the literal &middot; entity
+        # between them doesn't get double-escaped into visible text.
+        label = "{} &middot; {}".format(escape_html(entry["campus"]), escape_html(pretty_label(entry["short_name"])))
+        html_rows += detail_row_html_raw(label, entry["count"], avg_6wk(org_id=org_id))
     return html_rows
 
 
@@ -486,9 +734,9 @@ body = """
     kids=kids_total,
     leaders=leader_total,
     date_label=report_date_label,
-    kids_card=summary_card("Kids", kids_total, delta_text(kids_total, previous_kids_total)),
-    leader_card=summary_card("Volunteers", leader_total, delta_text(leader_total, previous_leader_total)),
-    total_card=summary_card("Total", grand_total, "Kids + volunteers"),
+    kids_card=summary_card("Kids", kids_total, with_avg_caption(delta_text(kids_total, previous_kids_total), kids_avg)),
+    leader_card=summary_card("Volunteers", leader_total, with_avg_caption(delta_text(leader_total, previous_leader_total), leader_avg)),
+    total_card=summary_card("Total", grand_total, with_avg_caption("Kids + volunteers", grand_avg)),
     missing_warning=missing_warning,
     campus_sections="".join(campus_section(campus) for campus in campuses),
     leader_rows=leader_rows(),
@@ -505,15 +753,22 @@ subject = "CM Attendance - {}: {} kids, {} volunteers".format(
 # SEND
 # ============================================================
 
-recipient_query = "peopleids='{}'".format(
-    ",".join(str(people_id) for people_id in recipient_people_ids)
-)
-model.Email(
-    recipient_query,
-    QUEUED_BY,
-    FROM_EMAIL,
-    FROM_NAME,
-    subject,
-    body,
-)
-print("<p>Weekly CM attendance report queued for {} recipient(s).</p>".format(len(recipient_people_ids)))
+if PREVIEW_MODE:
+    print(
+        "<p><strong>PREVIEW MODE</strong> -- no email sent. Would have gone to "
+        "{} recipient(s). Subject: {}</p>".format(len(recipient_people_ids), escape_html(subject))
+    )
+    print(body)
+else:
+    recipient_query = "peopleids='{}'".format(
+        ",".join(str(people_id) for people_id in recipient_people_ids)
+    )
+    model.Email(
+        recipient_query,
+        QUEUED_BY,
+        FROM_EMAIL,
+        FROM_NAME,
+        subject,
+        body,
+    )
+    print("<p>Weekly CM attendance report queued for {} recipient(s).</p>".format(len(recipient_people_ids)))

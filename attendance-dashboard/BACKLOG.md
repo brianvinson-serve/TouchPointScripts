@@ -4,6 +4,37 @@ Active work and request status for the Student Ministry attendance dashboard.
 
 ## In Progress
 
+### CM email rebuild: mirrored dashboard fixes + 6-week average
+
+**Status:** Waiting on client — live TouchPoint test run came back clean 2026-08-19, sent on to the RPC team for feedback
+**Requestor:** Brian (on Angela's behalf — Angela likes the full interactive dashboard but it isn't email-safe)
+**Requested:** 2026-08-19
+
+#### `model.CallScript` finding
+
+Investigated whether `CM_AttendanceDashboardEmail.py` could source its data by calling `cm-attendance-pyreport` (the interactive dashboard) via `model.CallScript(...)` and parsing the embedded `var rawData = [...]` JSON out of the returned HTML, instead of maintaining a second copy of the query/classification logic. A live spike test came back with 3 blank/empty rows — `model.CallScript` did not return the called script's rendered output in a usable form here. **Conclusion: `model.CallScript` is fire-and-forget in this TouchPoint instance** (consistent with every other use in this repo — `MorningBatch`, `SM_AttendanceDashboardEmail` scheduling — none of which use a return value or pass parameters). Don't retry this approach without new evidence it works differently.
+
+#### Implementation
+
+Given the above, `CM_AttendanceDashboardEmail.py` keeps its own copy of the query/classification logic (same pattern as `SM_AttendanceDashboardEmail.py`), now re-synced with the corrected `cm-attendance-pyreport.py`:
+
+- Kindergarten classified as Elementary, not Preschool.
+- Kids detail rows (Preschool/Elementary) sorted in age order via the same `_AGE_ORDER` tables as the dashboard, instead of alphabetically.
+- Central Welcome Team uses org `3587` (bypasses the reporting-division/Sunday-schedule checks via an explicit override) instead of the newer, currently-unused `4026`/`4027`, which are excluded outright.
+- The query window widened from 2 exact dates to a 6-Sunday `BETWEEN` range, and every row (detail lines, bucket/campus totals, the 3 summary cards) now shows a 6-week average next to the current Sunday's count. The average is computed only over Sundays that actually have a logged meeting for that scope (skips missing weeks rather than diluting new orgs).
+
+#### 2026-08-19 update: mirrored naming cleanup + volunteer sort, added Preview mode
+
+After the interactive dashboard got a naming-convention cleanup (`prettyLabel`) and a corrected volunteer sort (grouped by type -- Nursery/Kinder, Elementary, Special Needs, Welcome Team -- then by service time, instead of plain alphabetical), the same two fixes were ported into `CM_AttendanceDashboardEmail.py` (`pretty_label()`, `classify_volunteer_bucket()`, `volunteer_time_minutes()` -- same regexes/logic, Python instead of JS).
+
+Also added a `Preview` URL parameter for testing: `/PyScript/CM_AttendanceDashboardEmail?Preview=1` renders the full report body in the browser and prints a "PREVIEW MODE -- no email sent" banner instead of calling `model.Email(...)`. Any falsy/omitted value (`0`, `false`, blank) sends for real, unchanged. Verified both branches with a synthetic `model.Email` stub that raises if called while `Preview=1` -- confirmed it's never invoked in preview mode, and is invoked normally otherwise.
+
+#### Central Preschool/Nursery volunteers: confirmed no data yet, not a bug
+
+2026-08-19: Central's Volunteers section shows Elementary, Special Needs, and Welcome Team but no Preschool/Nursery bucket, even over the full "All" date range. Brian confirmed live via SQL: orgs `4018` (CM: CC 9:00 Volunteers Nursery/Preschool 2026-2027) and `4019` (CM: CC 10:45 Volunteers Nursery/Preschool 2026-2027) both exist, `OrganizationStatusId = 30` (active), and each has 1 `OrgSchedule` row — but `TotalMeetingsEver = 0` for both. Nobody has taken attendance on them yet. The dashboard's `INNER JOIN` to `Meetings` correctly hides orgs with zero attendance history regardless of date range, so this is expected behavior, not a filter bug. Will resolve itself the first Sunday CM records attendance on these two orgs — no code change needed.
+
+Any future fix to the dashboard's filter/classification/ordering/overrides must be re-applied here by hand — this is the accepted tradeoff of the `model.CallScript` finding above.
+
 ### Weekly SM attendance dashboard email
 
 **Status:** Wrapped — deployed live and scheduled in MorningBatch on 2026-08-13

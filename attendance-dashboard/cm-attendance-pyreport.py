@@ -39,6 +39,15 @@ from datetime import datetime, timedelta
 # times, both campuses -- they carry real Sunday schedules and weekly
 # attendance.
 #
+# ONE EXPLICIT OVERRIDE (confirmed by Angela 2026-08-19): org 3587
+# (CM: CC Welcome Team Scheduler) bypasses conditions 4 and 5 above -- it's
+# linked to Division 15 (CM Elementary) rather than the reporting divisions,
+# and has no standing OrgSchedule row -- because it's the org Angela actually
+# wants used for Central Welcome Team reporting. Orgs 4026/4027 (the newer
+# "...Volunteers Welcome Team 2026-2027" pair) are explicitly excluded so
+# Central Welcome Team doesn't double-count once those start logging
+# meetings. See @CentralWelcomeTeamOrgId in the SQL below.
+#
 # Parameters from URL (?StartDate=2026-01-01&EndDate=2026-07-08 etc.)
 # ============================================================
 data = model.Data
@@ -79,6 +88,17 @@ DECLARE @CCPrefix         VARCHAR(10)  = 'CM: CC '
 DECLARE @PSPrefix         VARCHAR(10)  = 'CM: PS '
 DECLARE @ScheduleLookbackDays INT      = 28
 
+-- Central Welcome Team reporting org, confirmed by Angela 2026-08-19: org
+-- 3587 (CM: CC Welcome Team Scheduler) is linked to Division 15 (CM
+-- Elementary), not the reporting divisions below, so it needs an explicit
+-- override -- and it carries real Sunday attendance (6 present 2026-08-16)
+-- while the newer 4026/4027 "...Volunteers Welcome Team 2026-2027" orgs
+-- exist but had no meeting logged that same Sunday. Excluding 4026/4027
+-- keeps Central Welcome Team numbers matching what Angela actually wants
+-- reported, and avoids silently doubling them if those orgs start getting
+-- meetings logged later.
+DECLARE @CentralWelcomeTeamOrgId INT  = 3587
+
 SELECT
     Campus = CASE
         WHEN o.OrganizationName LIKE @CCPrefix + '%' THEN 'Central'
@@ -114,6 +134,7 @@ WHERE
         OR (@CampusFilter = 'PARKERSQUARE' AND o.OrganizationName LIKE @PSPrefix + '%')
     )
     AND o.OrganizationTypeId IN (@KidsTypeId, @VolunteerTypeId)
+    AND o.OrganizationId NOT IN (4026, 4027)
     AND EXISTS (
         SELECT 1
         FROM dbo.DivOrg dp
@@ -121,11 +142,14 @@ WHERE
         WHERE dp.OrgId = o.OrganizationId
           AND d.ProgId  = @ProgramId
     )
-    AND EXISTS (
-        SELECT 1
-        FROM dbo.DivOrg dr
-        WHERE dr.OrgId = o.OrganizationId
-          AND dr.DivId IN (@CCReportingDivId, @PSReportingDivId)
+    AND (
+        EXISTS (
+            SELECT 1
+            FROM dbo.DivOrg dr
+            WHERE dr.OrgId = o.OrganizationId
+              AND dr.DivId IN (@CCReportingDivId, @PSReportingDivId)
+        )
+        OR o.OrganizationId = @CentralWelcomeTeamOrgId
     )
     -- Validated 2026-08-17: reporting-program linkage alone is too broad.
     -- Require a real Sunday presence -- either a standing Sunday schedule
@@ -144,6 +168,11 @@ WHERE
               AND CAST(sm.MeetingDate AS DATE) >= DATEADD(DAY, -@ScheduleLookbackDays, CAST(GETDATE() AS DATE))
               AND DATEPART(dw, sm.MeetingDate) = 1
         )
+        -- 3587 has no standing OrgSchedule row (it's a "Scheduler" org, not a
+        -- classroom/attendance org with a fixed recurring slot), so it can't
+        -- rely on the two checks above staying true every week. Bypass them
+        -- for this one confirmed org rather than let it silently drop out.
+        OR o.OrganizationId = @CentralWelcomeTeamOrgId
     )
 
 ORDER BY Campus, PersonType, OrganizationName, MeetingDate
@@ -170,7 +199,10 @@ def _norm_date(s):
 
 # Age-group / bucket classification confirmed against the full live 2026-08-17
 # involvement export (125 active CM orgs in reporting scope). Match order
-# matters: Special Needs is checked before Preschool/Elementary.
+# matters: Special Needs, then Kindergarten/Grade (Elementary), then Preschool.
+# Kindergarten confirmed by Brian 2026-08-19 as belonging in the Elementary
+# section, not Preschool -- it was previously misclassified via the
+# "kindergarten" keyword below matching before the "grade" check ran.
 _PRESCHOOL_KEYWORDS = (
     "infant",
     "crawler",
@@ -180,7 +212,6 @@ _PRESCHOOL_KEYWORDS = (
     "toddler",
     "prek",
     "pre-k",
-    "kindergarten",
     "nursery",
 )
 
@@ -189,11 +220,80 @@ def classify_age_group(name):
     lname = name.lower()
     if "special needs" in lname:
         return "Special Needs"
+    if "kindergarten" in lname or "grade" in lname:
+        return "Elementary"
     if any(k in lname for k in _PRESCHOOL_KEYWORDS):
         return "Preschool"
-    if "grade" in lname:
-        return "Elementary"
     return "Other"
+
+
+# Display order within each campus/bucket, confirmed by Brian 2026-08-19 as
+# the desired "age order" (youngest to oldest, service times interleaved in
+# the sequence he provided). Keys are org names with the "CM: CC "/"CM: PS "
+# campus prefix stripped, matching shortName() in the JS below. Any org not
+# found here (new/renamed orgs, Special Needs, "Other") falls back to
+# alphabetical -- see AgeRank handling in buildRows().
+_CENTRAL_PRESCHOOL_ORDER = [
+    "9:00a Infants", "10:45 AM Infants",
+    "9:00a Crawlers", "10:45 AM Crawlers",
+    "9:00a Walking-18 Months", "10:45 AM Walking-18 Months",
+    "9:00a 18-24 Months", "10:45 AM 18-24 Months",
+    "9:00a 2 Years", "10:45 AM 2 Years",
+    "9:00a 3 Years", "10:45 AM 3 Years",
+    "9:00a PreK (4-5 Years)", "10:45 AM PreK (4-5 Years)",
+]
+
+_CENTRAL_ELEMENTARY_ORDER = [
+    "9:00a Kindergarten", "10:45 AM Kindergarten",
+    "9:00a 1st Grade", "10:45 AM 1st Grade",
+    "9:00a 2nd Grade", "10:45 AM 2nd Grade",
+    "9:00a 3rd Grade Boys", "10:45 AM 3rd Grade Boys",
+    "9:00a 3rd Grade Girls", "10:45 AM 3rd Grade Girls",
+    "9:00a 4th Grade Boys", "10:45 AM 4th Grade Boys",
+    "9:00a 4th Grade Girls", "10:45 AM 4th Grade Girls",
+    "9:00a 5th Grade Boys", "10:45 AM 5th Grade Boys",
+    "9:00a 5th Grade Girls", "10:45 AM 5th Grade Girls",
+]
+
+_PS_PRESCHOOL_ORDER = [
+    "8:30 Infants (Birth-Crawling)", "9:45 Infants (Birth-Crawling)", "11:15 Infants (Birth-Crawling)",
+    "8:30 Toddlers (Walking-24 mo)", "9:45 Toddlers (Walking-24 mo)", "11:15 Toddlers (Walking-24 mo)",
+    "8:30 2 Years", "9:45 2 Years", "11:15 2 Years",
+    "8:30 3 Years", "9:45 3 Years", "11:15 3 Years",
+    "8:30 PreK", "9:45 PreK", "11:15 PreK",
+]
+
+_PS_ELEMENTARY_ORDER = [
+    "8:30 Kindergarten", "9:45 Kindergarten", "11:15 Kindergarten",
+    "8:30 1st Grade", "9:45 1st Grade", "11:15 1st Grade",
+    "8:30 2nd Grade", "9:45 2nd Grade", "11:15 2nd Grade",
+    "8:30 3rd Grade Boys", "9:45 3rd Grade Boys", "11:15 3rd Grade Boys",
+    "8:30 3rd Grade Girls", "9:45 3rd Grade Girls", "11:15 3rd Grade Girls",
+    "8:30 4th Grade Boys", "9:45 4th Grade Boys", "11:15 4th Grade Boys",
+    "8:30 4th Grade Girls", "9:45 4th Grade Girls", "11:15 4th Grade Girls",
+    "8:30 5th Grade Boys", "9:45 5th Grade Boys", "11:15 5th Grade Boys",
+    "8:30 5th Grade Girls", "9:45 5th Grade Girls", "11:15 5th Grade Girls",
+]
+
+_AGE_ORDER = {
+    ("Central", "Preschool"): _CENTRAL_PRESCHOOL_ORDER,
+    ("Central", "Elementary"): _CENTRAL_ELEMENTARY_ORDER,
+    ("Parker Square", "Preschool"): _PS_PRESCHOOL_ORDER,
+    ("Parker Square", "Elementary"): _PS_ELEMENTARY_ORDER,
+}
+
+_CAMPUS_PREFIX_RE = re.compile(r"^CM: (CC|PS) ")
+
+
+def age_rank(campus, bucket, org_name):
+    order = _AGE_ORDER.get((campus, bucket))
+    if not order:
+        return None
+    short = _CAMPUS_PREFIX_RE.sub("", org_name)
+    try:
+        return order.index(short)
+    except ValueError:
+        return None
 
 
 def classify_volunteer_bucket(name):
@@ -214,6 +314,7 @@ def classify_volunteer_bucket(name):
 # ============================================================
 rows = []
 for r in q.QuerySql(sql):
+    campus = str(r.Campus or "")
     org_name = str(r.OrganizationName or "")
     person_type = str(r.PersonType or "")
     bucket = (
@@ -223,9 +324,10 @@ for r in q.QuerySql(sql):
     )
     rows.append(
         {
-            "Campus": str(r.Campus or ""),
+            "Campus": campus,
             "PersonType": person_type,
             "Bucket": bucket,
+            "AgeRank": age_rank(campus, bucket, org_name) if person_type == "Kids" else None,
             "MeetingDate": _norm_date(str(r.MeetingDate or "")),
             "OrganizationId": int(r.OrganizationId or 0),
             "OrganizationName": org_name,
@@ -489,7 +591,7 @@ function renderTable(data,dates) {
   }
   var n=dates.length;
   var thDates=dates.map(function(d){return '<th>'+fmt(d)+'</th>';}).join('');
-  document.getElementById('thead').innerHTML='<tr><th class="col-label">Row</th>'+thDates+'<th class="col-total">Total</th><th class="col-avg">'+n+' Avg</th></tr>';
+  document.getElementById('thead').innerHTML='<tr><th class="col-label"></th>'+thDates+'<th class="col-total">Total</th><th class="col-avg">'+n+' Avg</th></tr>';
   var rows=buildRows(data,dates,n);
   document.getElementById('tbody').innerHTML=rows.map(function(r){
     if(r.type==='spacer')return '<tr class="r-spacer"><td colspan="'+(dates.length+3)+'"></td></tr>';
@@ -518,10 +620,10 @@ function buildRows(data,dates,n) {
         var bd=cd.filter(function(r){return r.Bucket===bucket;});
         if(!bd.length)continue;
         rows.push(mk('bucket',bucket,bd,dates,n));
-        var orgs=[...new Set(bd.map(function(r){return r.OrganizationName;}))].sort();
+        var orgs=sortByAgeRank(bd);
         for(var oi=0;oi<orgs.length;oi++){
           var org=orgs[oi];
-          rows.push(mk('detail',shortName(org),bd.filter(function(r){return r.OrganizationName===org;}),dates,n));
+          rows.push(mk('detail',prettyLabel(shortName(org)),bd.filter(function(r){return r.OrganizationName===org;}),dates,n));
         }
         rows.push(mk('subtotal',bucket+' Total',bd,dates,n));
       }
@@ -543,10 +645,10 @@ function buildRows(data,dates,n) {
         var cvd=vd.filter(function(r){return r.Campus===vcampus;});
         if(!cvd.length)continue;
         rows.push(mk('vol-campus',vcampus,cvd,dates,n));
-        var vorgs=[...new Set(cvd.map(function(r){return r.OrganizationName;}))].sort();
+        var vorgs=sortVolunteerOrgs(cvd);
         for(var voi=0;voi<vorgs.length;voi++){
           var vo=vorgs[voi];
-          rows.push(mk('vol-detail',shortName(vo),cvd.filter(function(r){return r.OrganizationName===vo;}),dates,n));
+          rows.push(mk('vol-detail',prettyLabel(shortName(vo)),cvd.filter(function(r){return r.OrganizationName===vo;}),dates,n));
         }
         rows.push(mk('vol-subtotal',vcampus+' Total',cvd,dates,n));
       }
@@ -564,6 +666,52 @@ function mk(type,label,data,dates,n){
   var total=Object.values(byDate).reduce(function(s,v){return s+v;},0);
   var avg=n>0?Math.round(total/n):0;
   return{type:type,label:label,byDate:byDate,total:total,avg:avg};
+}
+
+function sortByAgeRank(rows){
+  var rankOf={};
+  rows.forEach(function(r){rankOf[r.OrganizationName]=r.AgeRank;});
+  return [...new Set(rows.map(function(r){return r.OrganizationName;}))].sort(function(a,b){
+    var ra=rankOf[a]!=null?rankOf[a]:9999, rb=rankOf[b]!=null?rankOf[b]:9999;
+    if(ra!==rb)return ra-rb;
+    return a<b?-1:a>b?1:0;
+  });
+}
+
+// CM staff's TouchPoint org-naming conventions are inconsistent ("9:00a" vs
+// "10:45 AM" vs "9:00 a", "Volunteer" vs "Volunteers", a trailing school-year
+// suffix) -- this only cleans up the on-screen label; grouping/sorting and
+// CSV export still use the raw OrganizationName untouched.
+function prettyLabel(name){
+  name = name.replace(/^(\\d{1,2}):(\\d{2})\\s*a\\.?m?\\.?\\s*/i, function(_, h, m){ return h+':'+m+' AM '; });
+  name = name.replace(/\\bVolunteers?\\b\\s*/i, '');
+  name = name.replace(/\\s*\\d{4}-\\d{4}\\s*$/, '');
+  return name.replace(/\\s{2,}/g, ' ').trim();
+}
+
+var VOLUNTEER_BUCKET_ORDER = {'Nursery/Kinder':0, 'Elementary':1, 'Special Needs':2, 'Welcome Team':3, 'Other':4};
+
+function volunteerTimeMinutes(name){
+  var m = name.match(/(\\d{1,2}):(\\d{2})/);
+  return m ? (parseInt(m[1],10)*60 + parseInt(m[2],10)) : 9999;
+}
+
+function sortVolunteerOrgs(rows){
+  var infoOf={};
+  rows.forEach(function(r){
+    if(!infoOf[r.OrganizationName]){
+      infoOf[r.OrganizationName]={
+        bucket: VOLUNTEER_BUCKET_ORDER.hasOwnProperty(r.Bucket) ? VOLUNTEER_BUCKET_ORDER[r.Bucket] : 5,
+        time: volunteerTimeMinutes(r.OrganizationName),
+      };
+    }
+  });
+  return [...new Set(rows.map(function(r){return r.OrganizationName;}))].sort(function(a,b){
+    var ia=infoOf[a], ib=infoOf[b];
+    if(ia.bucket!==ib.bucket)return ia.bucket-ib.bucket;
+    if(ia.time!==ib.time)return ia.time-ib.time;
+    return a<b?-1:a>b?1:0;
+  });
 }
 
 function allDates(data){

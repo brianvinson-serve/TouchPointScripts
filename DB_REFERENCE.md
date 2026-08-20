@@ -55,6 +55,12 @@ The dated discovery evidence is retained at `data-dictionary-expander/exports/20
 
 Do not include rows solely because Angela Cheshire or Jennifer Schmitz is a member, or because an unrelated involvement name contains “kids” or “children.” Explicitly exclude the incorrectly linked `SM: PS Sunday Morning Volunteers 2026-2027` row. An organization can have multiple meetings on one Sunday (the PS Welcome Team had three on 2026-08-16), so weekly organization attendance must sum all non-canceled, non-`DidNotMeet` meetings for that organization/date rather than selecting `TOP 1` latest meeting.
 
+**Embrace Ministry (Special Needs) involvement names — confirmed by email 2026-08-19.** Marlene (Embrace Ministry) sent the exact roster of Division 14 involvements the dashboard/email should be counting:
+- Central: `CM: CC 9:00a Special Needs Kids`, `CM: CC 10:45 AM Special Needs Kids`, `CM: CC 9:00 a Volunteers Special Needs`, `CM: CC 10:45 AM Volunteers Special Needs`
+- Parker Square: `CM: PS 9:45 Special Needs Kids`, `CM: PS 11:15 Special Needs Kids`, `CM: PS 9:45 Volunteers Special Needs`, `CM: PS 11:15 Volunteers Special Needs`
+
+All eight already fall under the existing `"special needs" in lname` classification in both `cm-attendance-pyreport.py` and `CM_AttendanceDashboardEmail.py` (see their header notes for the 2026-08-17 validated scope) — no code change required. Filed here as written ministry confirmation of the names.
+
 ---
 
 ## Organization Type IDs (updated 2026-07-08 from full org scan)
