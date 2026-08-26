@@ -286,6 +286,84 @@ The 12-recipient production PeopleId list was resolved from the live whole-domai
 
 Update the DECLARE @SMStaff block in SM_TaskNote-ToDo.sql when staff changes.
 
+**Correction, confirmed 2026-08-26:** Weston Watts (19570) is no longer on staff. This list (and `SM_TaskNote-ToDo.sql`'s `@SMStaff` table, and `SM_StaffTaskDashboard.py`'s `SM_STAFF` list) still has him as active — needs updating next time either script is touched. He's already handled correctly in the newer church-wide roster below (bucketed `Unassigned` rather than removed, so any orphaned tasks of his stay visible).
+
+---
+
+## RPC Staff Departments (hardcoded roster — update when staff change)
+
+Church-wide `PeopleId -> Department` mapping, for the department axis of the `RPC_StaffTaskDashboard` dashboard (task type comes from `Keyword`/`TaskNoteKeyword` instead — see above). No native TouchPoint field ties a person or a task to a department at RPC (`TaskNote.OrgId` is unused; no department-shaped `MemberTags` usage exists — see notes above), so this is maintained by hand, same pattern as `SM Staff` above.
+
+**Source:** the 64 people holding an open TaskNote task church-wide (query confirmed 2026-08-25), cross-referenced against the live staff directory `https://www.rockpointechurch.org/staff/department/all-staff` (fetched 2026-08-26), plus two corrections Brian confirmed by hand (Isaac Jiles and Abbie Vinson are Student Ministry despite the directory listing them under "Ministry Leaders"). This is the same data as the `ROSTER` dict in `outstanding-task-notifications/dashboard/RPC_StaffTaskDashboard.py` — **keep both in sync**; the code comment there points back here.
+
+| PeopleId | Name | Department |
+|---|---|---|
+| 18460 | Abrie Champion | Worship and Production |
+| 29093 | Aimee Whaley | Special Needs Ministry |
+| 1673 | Alan Michael | Executive/Admin |
+| 6674 | Amy Kraus | Special Needs Ministry |
+| 2879 | Angela Cheshire | Children's Ministry |
+| 17314 | Arianah Torres | Men's Ministry |
+| 21230 | Ashley Reynolds | Special Needs Ministry |
+| 22732 | Austin Powell | Worship and Production |
+| 23670 | Brenda Bommarito | Connections Team |
+| 26216 | Bridget Church | Communications |
+| 13982 | Cam Champion | Worship and Production |
+| 3262 | Christi Victor | Children's Ministry |
+| 19792 | Colleen Dobbs | Care Team |
+| 284 | Courtney Edmondson | Student Ministry |
+| 23538 | Courtney Rehbehn | Children's Ministry |
+| 10430 | Debbie Avinger | Marriage Ministry |
+| 23748 | Greg Methvin | Marriage Ministry |
+| 46965 | Isaac Jiles | Student Ministry *(per Brian; directory lists "Ministry Leaders")* |
+| 21285 | Jason Trottie | Ministry Leaders |
+| 4666 | Jen Armstrong | Small Groups |
+| 24371 | Kelli Leird | Marriage Ministry |
+| 5285 | Kellie Lampe | Operations |
+| 15580 | Kimberley Cramer | Small Groups |
+| 9393 | Kristin Baker | Connections Team |
+| 7039 | Lauren Etter | Women's Ministry |
+| 28926 | Leah McBain | Children's Ministry |
+| 11144 | Linda Morrison | NextGen Ministry |
+| 28745 | Maddy McCalley | Young Adults |
+| 37195 | Makayla Tucker | Student Ministry |
+| 2990 | Marcie Rumsey | Operations |
+| 35320 | Margaret Bartlebaugh | Mid-Gen/Senior Adults |
+| 106 | Margo Baisley | Children's Ministry |
+| 8962 | Maria Jerke | Missions & Church Planting |
+| 7059 | Marlene Godinez | Operations |
+| 23164 | Max McCalley | Student Ministry |
+| 34921 | Megan DeFilippo | Care Team |
+| 665 | Melissa Pierce | Operations |
+| 35319 | Ned Bartlebaugh | Care Team |
+| 25605 | Sara Comer | Special Needs Ministry |
+| 34835 | Steven Christopher | Men's Ministry |
+| 17100 | Tino Smith | Young Adults |
+| 32745 | Trace Summers | Worship and Production |
+| 300 | Traci Erb | Weekday Preschool |
+| 29228 | Treeka Andries | Weekday Preschool |
+| 2351 | Virginia Smith | Connections Team |
+| 28000 | Abbie Vinson | Student Ministry *(per Brian; directory lists "Ministry Leaders")* |
+| 44574 | Alex Erkelens | Unassigned — not on public directory |
+| 45948 | Anthony Aguilar | Unassigned — not on public directory |
+| 46101 | Ayeli Padron | Unassigned — not on public directory |
+| 45732 | Brandi Protonentis | Unassigned — not on public directory |
+| 27392 | Chris Victor | Unassigned — not on public directory |
+| 49649 | David Johnston | Unassigned — not on public directory |
+| 4353 | Gary Tyner | Unassigned — not on public directory |
+| 44564 | Jillian Diveley | Unassigned — not on public directory |
+| 3222 | Matthew Webb | Unassigned — not on public directory |
+| 45230 | Nancy Tassy | Unassigned — not on public directory |
+| 5673 | Natalie Hite | Unassigned — not on public directory |
+| 45265 | Patricia Barela | Unassigned — not on public directory |
+| 46456 | Patti Flynn | Unassigned — not on public directory |
+| 47918 | Stacie Tran | Unassigned — not on public directory |
+| 28183 | Stephanie Hiester | Unassigned — not on public directory |
+| 19570 | Weston Watts | Unassigned — confirmed off staff 2026-08-26, kept visible rather than removed |
+| 33283 | TP System | System Account — non-human integration account, not a staff member |
+
+15 people (Alex Erkelens through Stephanie Hiester above) are not resolved to a real department — they weren't on the public staff directory as of 2026-08-26 and may not be current payroll staff. Don't guess their department; confirm with Brian/Marlene and update both this table and the `ROSTER` dict together.
+
 ---
 
 ## MemberTypeId Values
