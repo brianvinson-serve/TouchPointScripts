@@ -39,14 +39,32 @@ from datetime import datetime, timedelta
 # times, both campuses -- they carry real Sunday schedules and weekly
 # attendance.
 #
-# ONE EXPLICIT OVERRIDE (confirmed by Angela 2026-08-19): org 3587
-# (CM: CC Welcome Team Scheduler) bypasses conditions 4 and 5 above -- it's
-# linked to Division 15 (CM Elementary) rather than the reporting divisions,
-# and has no standing OrgSchedule row -- because it's the org Angela actually
-# wants used for Central Welcome Team reporting. Orgs 4026/4027 (the newer
-# "...Volunteers Welcome Team 2026-2027" pair) are explicitly excluded so
-# Central Welcome Team doesn't double-count once those start logging
-# meetings. See @CentralWelcomeTeamOrgId in the SQL below.
+# TWO EXPLICIT OVERRIDES:
+#
+# 1. (Confirmed by Angela 2026-08-19) org 3587 (CM: CC Welcome Team
+#    Scheduler) bypasses conditions 4 and 5 above -- it's linked to Division
+#    15 (CM Elementary) rather than the reporting divisions, and has no
+#    standing OrgSchedule row -- because it's the org Angela actually wants
+#    used for Central Welcome Team reporting. Orgs 4026/4027 (the newer
+#    "...Volunteers Welcome Team 2026-2027" pair) are explicitly excluded so
+#    Central Welcome Team doesn't double-count once those start logging
+#    meetings. See @CentralWelcomeTeamOrgId in the SQL below.
+#
+# 2. (Per Angela's email 2026-08-25) org 3508 (CM: PS 8:30 Birth-5th
+#    Volunteers Scheduler) is now the org PS 8:30 volunteers actually check
+#    into, replacing the two previously-listed orgs 4020 (CM: PS 8:30
+#    Volunteers Nursery/Kinder 2026-2027) and 4021 (CM: PS 8:30 Volunteers
+#    Elementary 2026-2027), which Angela is making inactive. Same override
+#    shape as 3587 -- bypasses conditions 4/5 and excludes 4020/4021 outright
+#    -- applied by analogy to the "...Scheduler" naming pattern, since org
+#    3508's own DivOrg linkage/OrgSchedule/OrganizationTypeId have NOT been
+#    independently confirmed via a live query (no live TouchPoint access in
+#    this session). Verify live before/soon after deploying -- see
+#    BACKLOG.md. Because 3508 spans "Birth-5th" (both former buckets in one
+#    org), it's classified into the "Nursery/Kinder" volunteer bucket by
+#    explicit OrganizationId match rather than by name-keyword match --
+#    see @PS830VolunteersSchedulerOrgId in the SQL below and
+#    classify_volunteer_bucket() below.
 #
 # Parameters from URL (?StartDate=2026-01-01&EndDate=2026-07-08 etc.)
 # ============================================================
@@ -99,6 +117,13 @@ DECLARE @ScheduleLookbackDays INT      = 28
 -- meetings logged later.
 DECLARE @CentralWelcomeTeamOrgId INT  = 3587
 
+-- PS 8:30 volunteer reporting org, per Angela's email 2026-08-25: org 3508
+-- (CM: PS 8:30 Birth-5th Volunteers Scheduler) is what 8:30 PS volunteers
+-- now check into, replacing 4020/4021 below, which Angela is making
+-- inactive. Not yet independently confirmed live (division/schedule/type) --
+-- treated the same as the 3587 override by analogy pending that check.
+DECLARE @PS830VolunteersSchedulerOrgId INT = 3508
+
 SELECT
     Campus = CASE
         WHEN o.OrganizationName LIKE @CCPrefix + '%' THEN 'Central'
@@ -134,7 +159,7 @@ WHERE
         OR (@CampusFilter = 'PARKERSQUARE' AND o.OrganizationName LIKE @PSPrefix + '%')
     )
     AND o.OrganizationTypeId IN (@KidsTypeId, @VolunteerTypeId)
-    AND o.OrganizationId NOT IN (4026, 4027)
+    AND o.OrganizationId NOT IN (4026, 4027, 4020, 4021)
     AND EXISTS (
         SELECT 1
         FROM dbo.DivOrg dp
@@ -149,7 +174,7 @@ WHERE
             WHERE dr.OrgId = o.OrganizationId
               AND dr.DivId IN (@CCReportingDivId, @PSReportingDivId)
         )
-        OR o.OrganizationId = @CentralWelcomeTeamOrgId
+        OR o.OrganizationId IN (@CentralWelcomeTeamOrgId, @PS830VolunteersSchedulerOrgId)
     )
     -- Validated 2026-08-17: reporting-program linkage alone is too broad.
     -- Require a real Sunday presence -- either a standing Sunday schedule
@@ -168,11 +193,11 @@ WHERE
               AND CAST(sm.MeetingDate AS DATE) >= DATEADD(DAY, -@ScheduleLookbackDays, CAST(GETDATE() AS DATE))
               AND DATEPART(dw, sm.MeetingDate) = 1
         )
-        -- 3587 has no standing OrgSchedule row (it's a "Scheduler" org, not a
-        -- classroom/attendance org with a fixed recurring slot), so it can't
-        -- rely on the two checks above staying true every week. Bypass them
-        -- for this one confirmed org rather than let it silently drop out.
-        OR o.OrganizationId = @CentralWelcomeTeamOrgId
+        -- 3587 and 3508 are "Scheduler" orgs, not classroom/attendance orgs
+        -- with a fixed recurring slot, so they can't rely on the two checks
+        -- above staying true every week. Bypass them for these two
+        -- confirmed-by-name orgs rather than let them silently drop out.
+        OR o.OrganizationId IN (@CentralWelcomeTeamOrgId, @PS830VolunteersSchedulerOrgId)
     )
 
 ORDER BY Campus, PersonType, OrganizationName, MeetingDate
@@ -296,7 +321,12 @@ def age_rank(campus, bucket, org_name):
         return None
 
 
-def classify_volunteer_bucket(name):
+def classify_volunteer_bucket(name, org_id=None):
+    # Org 3508 (CM: PS 8:30 Birth-5th Volunteers Scheduler) spans both the
+    # Nursery/Kinder and Elementary buckets in one org, so its name alone
+    # won't match either keyword rule below -- match by ID instead of text.
+    if org_id == 3508:
+        return "Nursery/Kinder"
     lname = name.lower()
     if "special needs" in lname:
         return "Special Needs"
@@ -316,9 +346,10 @@ rows = []
 for r in q.QuerySql(sql):
     campus = str(r.Campus or "")
     org_name = str(r.OrganizationName or "")
+    org_id = int(r.OrganizationId or 0)
     person_type = str(r.PersonType or "")
     bucket = (
-        classify_volunteer_bucket(org_name)
+        classify_volunteer_bucket(org_name, org_id)
         if person_type == "Volunteers"
         else classify_age_group(org_name)
     )
@@ -329,7 +360,7 @@ for r in q.QuerySql(sql):
             "Bucket": bucket,
             "AgeRank": age_rank(campus, bucket, org_name) if person_type == "Kids" else None,
             "MeetingDate": _norm_date(str(r.MeetingDate or "")),
-            "OrganizationId": int(r.OrganizationId or 0),
+            "OrganizationId": org_id,
             "OrganizationName": org_name,
             "Attendance": int(r.Attendance or 0),
         }
@@ -458,8 +489,8 @@ tr.r-spacer td{height:6px;background:#f0f4f8;border:none}
       <span class="filter-label">Range</span>
       <div class="btn-group" id="presetBtns">
         <button class="btn-toggle" onclick="setPreset(4,this)">4 wk</button>
+        <button class="btn-toggle" onclick="setPreset(6,this)">6 wk</button>
         <button class="btn-toggle" onclick="setPreset(8,this)">8 wk</button>
-        <button class="btn-toggle" onclick="setPreset(13,this)">13 wk</button>
         <button class="btn-toggle active" onclick="setPreset('all',this)">All</button>
       </div>
       <div class="date-row">
@@ -672,8 +703,16 @@ function sortByAgeRank(rows){
   var rankOf={};
   rows.forEach(function(r){rankOf[r.OrganizationName]=r.AgeRank;});
   return [...new Set(rows.map(function(r){return r.OrganizationName;}))].sort(function(a,b){
-    var ra=rankOf[a]!=null?rankOf[a]:9999, rb=rankOf[b]!=null?rankOf[b]:9999;
-    if(ra!==rb)return ra-rb;
+    var ra=rankOf[a], rb=rankOf[b];
+    // _AGE_ORDER has no Special Needs table (no age progression to rank), so
+    // AgeRank is null there -- fall back to service time instead of
+    // alphabetical, which would sort "10:45 ..." before "9:00 ..." since "1"
+    // < "9" as text.
+    if(ra!=null && rb!=null) return ra-rb;
+    if(ra!=null) return -1;
+    if(rb!=null) return 1;
+    var ta=volunteerTimeMinutes(a), tb=volunteerTimeMinutes(b);
+    if(ta!==tb) return ta-tb;
     return a<b?-1:a>b?1:0;
   });
 }

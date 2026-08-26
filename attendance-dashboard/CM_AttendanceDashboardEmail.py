@@ -53,6 +53,18 @@
 #   had no meeting logged as of 2026-08-16. 3587 bypasses the normal
 #   reporting-division/Sunday-schedule checks via an explicit override; see
 #   @CentralWelcomeTeamOrgId below.
+# - PS 8:30 volunteer reporting org, per Angela's email 2026-08-25: org 3508
+#   (CM: PS 8:30 Birth-5th Volunteers Scheduler) is what 8:30 PS volunteers
+#   now check into, replacing 4020 (CM: PS 8:30 Volunteers Nursery/Kinder
+#   2026-2027) and 4021 (CM: PS 8:30 Volunteers Elementary 2026-2027), which
+#   Angela is making inactive. Same override shape as 3587: bypasses
+#   conditions 4/5, excludes 4020/4021 outright. NOT independently confirmed
+#   live (division/schedule/type) -- applied by analogy to the "...Scheduler"
+#   naming pattern; verify live before/soon after deploying. Because 3508
+#   spans "Birth-5th" (both former buckets in one org), it's classified into
+#   the "Nursery/Kinder" volunteer bucket by explicit OrganizationId match
+#   rather than by name-keyword match; see @PS830VolunteersSchedulerOrgId
+#   below and classify_volunteer_bucket() below.
 #
 # RECIPIENTS -- STATUS AS OF 2026-08-17:
 # Marlene's request came in copying Angela Cheshire (Children's Ministry
@@ -114,7 +126,13 @@ ORGANIZATION_STATUS_ACTIVE = 30
 # explicit override; 4026/4027 are excluded outright so Central Welcome Team
 # never double-counts once those newer orgs start logging meetings.
 CENTRAL_WELCOME_TEAM_ORG_ID = 3587
-EXCLUDED_ORG_IDS = (4026, 4027)
+
+# PS 8:30 volunteer reporting org (see header note): included via the same
+# explicit-override shape as Central Welcome Team; 4020/4021 are excluded
+# outright since Angela is making them inactive in favor of this org.
+PS_830_VOLUNTEERS_SCHEDULER_ORG_ID = 3508
+
+EXCLUDED_ORG_IDS = (4026, 4027, 4020, 4021)
 
 # How many trailing Sundays (including the report Sunday) feed the 6-week
 # average shown next to every current-Sunday number.
@@ -163,6 +181,7 @@ DECLARE @CCPrefix         VARCHAR(10)  = 'CM: CC '
 DECLARE @PSPrefix         VARCHAR(10)  = 'CM: PS '
 DECLARE @ScheduleLookbackDays INT      = 28
 DECLARE @CentralWelcomeTeamOrgId INT   = {central_welcome_team_org_id}
+DECLARE @PS830VolunteersSchedulerOrgId INT = {ps_830_volunteers_scheduler_org_id}
 
 SELECT
     Campus = CASE
@@ -201,7 +220,7 @@ WHERE o.OrganizationStatusId = @ActiveStatusId
           WHERE dr.OrgId = o.OrganizationId
             AND dr.DivId IN (@CCReportingDivId, @PSReportingDivId)
       )
-      OR o.OrganizationId = @CentralWelcomeTeamOrgId
+      OR o.OrganizationId IN (@CentralWelcomeTeamOrgId, @PS830VolunteersSchedulerOrgId)
   )
   -- Validated 2026-08-17: reporting-program linkage alone is too broad.
   -- Require a real Sunday presence -- a standing Sunday schedule or an
@@ -219,11 +238,10 @@ WHERE o.OrganizationStatusId = @ActiveStatusId
             AND CAST(sm.MeetingDate AS DATE) >= DATEADD(DAY, -@ScheduleLookbackDays, CAST(GETDATE() AS DATE))
             AND DATEPART(dw, sm.MeetingDate) = 1
       )
-      -- 3587 has no standing OrgSchedule row (it's a "Scheduler" org, not a
-      -- classroom/attendance org with a fixed recurring slot); bypass the
-      -- two checks above for this one confirmed org rather than let it
-      -- silently drop out.
-      OR o.OrganizationId = @CentralWelcomeTeamOrgId
+      -- 3587 and 3508 are "Scheduler" orgs, not classroom/attendance orgs
+      -- with a fixed recurring slot; bypass the two checks above for these
+      -- two confirmed-by-name orgs rather than let them silently drop out.
+      OR o.OrganizationId IN (@CentralWelcomeTeamOrgId, @PS830VolunteersSchedulerOrgId)
   )
 ORDER BY Campus, PersonType, OrganizationName, MeetingDate
 """.format(
@@ -236,6 +254,7 @@ ORDER BY Campus, PersonType, OrganizationName, MeetingDate
     report_date=report_date_sql,
     window_start=window_start_sql,
     central_welcome_team_org_id=CENTRAL_WELCOME_TEAM_ORG_ID,
+    ps_830_volunteers_scheduler_org_id=PS_830_VOLUNTEERS_SCHEDULER_ORG_ID,
     excluded_org_ids=",".join(str(org_id) for org_id in EXCLUDED_ORG_IDS),
 )
 
@@ -347,7 +366,12 @@ def age_rank(campus, bucket, org_name):
 # Mirrored from cm-attendance-pyreport.py's classify_volunteer_bucket/sort:
 # groups volunteer rows by type (Nursery/Kinder -> Elementary -> Special
 # Needs -> Welcome Team) then by service time, instead of plain alphabetical.
-def classify_volunteer_bucket(name):
+def classify_volunteer_bucket(name, org_id=None):
+    # Org 3508 (CM: PS 8:30 Birth-5th Volunteers Scheduler) spans both the
+    # Nursery/Kinder and Elementary buckets in one org, so its name alone
+    # won't match either keyword rule below -- match by ID instead of text.
+    if org_id == PS_830_VOLUNTEERS_SCHEDULER_ORG_ID:
+        return "Nursery/Kinder"
     lname = name.lower()
     if "special needs" in lname:
         return "Special Needs"
@@ -592,7 +616,14 @@ def detail_rows(campus, bucket):
     def sort_key(org_id):
         entry = orgs[org_id]
         rank = age_rank(campus, bucket, entry["full_name"])
-        return (rank if rank is not None else 9999, entry["short_name"])
+        # _AGE_ORDER has no Special Needs table (there's no age progression to
+        # rank), so without this, rank falls back to alphabetical on the
+        # short name -- which sorts "10:45 AM ..." before "9:00 AM ..." since
+        # "1" < "9" as text. Fall back to service time instead, same as the
+        # volunteer sort below.
+        if rank is not None:
+            return (0, rank, entry["short_name"])
+        return (1, volunteer_time_minutes(entry["full_name"]), entry["short_name"])
 
     html_rows = column_header_row()
     for org_id in sorted(orgs, key=sort_key):
@@ -655,7 +686,7 @@ def leader_rows():
 
     def sort_key(org_id):
         entry = orgs[org_id]
-        bucket_rank = _VOLUNTEER_BUCKET_ORDER.get(classify_volunteer_bucket(entry["full_name"]), 4)
+        bucket_rank = _VOLUNTEER_BUCKET_ORDER.get(classify_volunteer_bucket(entry["full_name"], org_id), 4)
         return (entry["campus"], bucket_rank, volunteer_time_minutes(entry["full_name"]), entry["short_name"])
 
     html_rows = column_header_row()

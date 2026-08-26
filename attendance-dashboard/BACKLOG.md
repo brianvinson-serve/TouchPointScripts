@@ -8,6 +8,27 @@ Active work and request status for the Student Ministry attendance dashboard.
 
 **Status:** Waiting on client — live TouchPoint test run came back clean 2026-08-19, sent on to the RPC team for feedback
 **Requestor:** Brian (on Angela's behalf — Angela likes the full interactive dashboard but it isn't email-safe)
+
+#### 2026-08-26 update: Angela's reply — PS 8:30 volunteer org swap, range presets, confirmed report shape
+
+Angela Cheshire replied 2026-08-25 (cc Jennifer Schmitz, Ashley, Marlene) after reviewing the 2026-08-23 live dashboard and the email report still in testing:
+
+1. **PS 8:30 volunteers moved to a scheduler org.** The two orgs previously listed for PS 8:30 volunteers — `4020` (CM: PS 8:30 Volunteers Nursery/Kinder 2026-2027) and `4021` (CM: PS 8:30 Volunteers Elementary 2026-2027) — are no longer where people check in. Angela said the real org is `3508` (CM: PS 8:30 Birth-5th Volunteers Scheduler) and that she'll make 4020/4021 inactive. Implemented in both `cm-attendance-pyreport.py` and `CM_AttendanceDashboardEmail.py`: org 3508 added as a second explicit override (`@PS830VolunteersSchedulerOrgId`, same bypass-conditions-4/5 shape as the existing `@CentralWelcomeTeamOrgId` = 3587 override), and 4020/4021 added to the excluded-org-IDs list alongside 4026/4027. Because 3508 covers "Birth-5th" in one org (both former buckets combined), `classify_volunteer_bucket()` in both scripts now takes an `org_id` and special-cases 3508 into the "Nursery/Kinder" bucket by ID rather than by name-keyword match, since its name doesn't contain "nursery," "kinder," or "elementary."
+   - **Not independently confirmed live** — no live TouchPoint SQL access in this session. Org 3508's `OrganizationTypeId` (should be 207), `OrganizationStatusId` (should be 30/active), and DivOrg/OrgSchedule linkage (assumed to need the override, by analogy to 3587's "Scheduler" org pattern) are all unverified. Brian should confirm via a live run or query before treating this as production-correct, and update this note / `DB_REFERENCE.md` once confirmed.
+   - Angela did not say whether 4020/4021 should be deactivated before or after this deploys. Excluding them outright now means no double-counting risk regardless of timing.
+2. **General preschool volunteer involvements will change again "in the next couple of weeks."** Angela asked whether she should just email the new involvement when that happens. Answered: yes — no code change needed now, this is a placeholder for a future request in the same shape as the 3508 swap above.
+3. **Dashboard range presets: 4wk/8wk/13wk → 4wk/6wk/8wk.** Done in `cm-attendance-pyreport.py` — the three preset buttons now call `setPreset(4|6|8, this)`. No other logic change needed: the average column header already reads `{n} Avg` off however many weeks are in the selected range, so selecting "6 wk" now shows a live 6-week average automatically.
+4. **Supply-ladies' ask (most recent Sunday, past 6 weeks, 6-wk average) and Angela's ask for the email (past Sunday vs. week before, plus 6-wk avg) are already satisfied by existing work**, not new asks: the dashboard's per-row/per-bucket average already reflects the active range (see #3), and `CM_AttendanceDashboardEmail.py`'s existing `AVERAGE_WINDOW_WEEKS = 6` and week-over-week delta (shipped in the 2026-08-19 rebuild) already show exactly "last Sunday vs. 6-wk avg." No code change made for this item — confirm it reads correctly once 3508 has real data in the next live test.
+
+Still gated on the existing recipient-list sign-off note above (`RECIPIENT_PEOPLE_IDS` remains Angela/Jennifer/Brian only) — this round of fixes doesn't change that, and Jennifer's confirmation is still needed before scheduling `MorningBatch`.
+
+#### 2026-08-26 fix: Special Needs rows sorted alphabetically instead of by service time
+
+Brian flagged (from the 2026-08-23 email preview) that Special Needs rows showed 10:45 AM before 9:00 AM (Central) and 11:15 before 9:45 (Parker Square). Root cause: `_AGE_ORDER` only has Preschool/Elementary tables — there's no age progression to rank within Special Needs — so `age_rank()` returns `None` for that bucket and the sort fell back to alphabetical on the org name, where `"1"` sorts before `"9"` as text.
+
+Fixed in `CM_AttendanceDashboardEmail.py`'s `detail_rows()`: when `age_rank()` is `None`, the sort key now falls back to `volunteer_time_minutes()` (the same H:MM regex parser already used for volunteer sorting) instead of alphabetical. Ranked rows are unaffected (still sorted 0..N ahead of any unranked rows).
+
+The same root cause exists in the interactive dashboard (`cm-attendance-pyreport.py`'s `sortByAgeRank()` JS, confirmed from the 2026-08-23 screenshot Brian originally sent), so it was fixed there too by the same shape: fall back to `volunteerTimeMinutes()` instead of alphabetical when `AgeRank` is null on either side. Verified both the Python (`detail_rows`) and JS (`sortByAgeRank`) fallback logic in isolation with sample Central/Parker Square Special Needs org name pairs — both now sort 9:00 before 10:45 and 9:45 before 11:15.
 **Requested:** 2026-08-19
 
 #### `model.CallScript` finding
