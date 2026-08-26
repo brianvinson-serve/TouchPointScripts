@@ -1,5 +1,5 @@
 # TouchPoint Database Reference - RockPointe
-**Last Updated:** 2026-08-25
+**Last Updated:** 2026-08-26
 
 This doc captures confirmed IDs, table structures, and join patterns discovered
 by running queries against the live rockpointe.tpsdb.com instance.
@@ -20,6 +20,7 @@ Structural metadata confirms object/column/key existence. Status/type meanings a
 | 1137   | Reporting (RP) CC Children ONLY Sun AM |
 | 1138   | Reporting (RP) PS Children ONLY Sun AM |
 | 1141   | RP PS Students |
+| 1119   | Adult Discipleship (AD) |
 
 ---
 
@@ -60,6 +61,22 @@ Do not include rows solely because Angela Cheshire or Jennifer Schmitz is a memb
 - Parker Square: `CM: PS 9:45 Special Needs Kids`, `CM: PS 11:15 Special Needs Kids`, `CM: PS 9:45 Volunteers Special Needs`, `CM: PS 11:15 Volunteers Special Needs`
 
 All eight already fall under the existing `"special needs" in lname` classification in both `cm-attendance-pyreport.py` and `CM_AttendanceDashboardEmail.py` (see their header notes for the 2026-08-17 validated scope) — no code change required. Filed here as written ministry confirmation of the names.
+
+---
+
+## Adult Discipleship (AD) / ReNew — confirmed 2026-08-26
+
+Program `1119` = Adult Discipleship (AD). Division `126` = "AD ReNew"; the broader `31` = "AD Classes/Meetings/Groups" also carries most AD-program orgs (including ReNew ones), so filter on org name, not just division, when isolating ReNew specifically.
+
+ReNew is a recovery/step-group ministry that runs a new `OrganizationId` each term (Fall/Spring), discovered live via `OrganizationName LIKE '%renew%'` — no prior script or reference to this ministry existed in this repo before 2026-08-26. Observed `OrganizationStatusId` values in the family: `30` = Active (current-term org), `40` appears consistently on every past-term org (F24, S25, F25, S26, etc.) — treat `40` as "past/completed term," distinct from the general "inactive" framing elsewhere in this doc; not yet confirmed against a `lookup.OrganizationStatus` label.
+
+**ReNew Fall 2026 (current term):** `OrganizationId = 3906`, `OrganizationName = "ReNew Fall 2026"`, `OrganizationTypeId = 201`, `OrganizationStatusId = 30`, ~50 members. Linked in both Division 126 (AD ReNew) and Division 31 (AD Classes/Meetings/Groups). Meets weekly on **Mondays** — confirmed live: two meetings held so far (2026-08-17, 2026-08-24, `NumPresent` 35 and 34).
+
+No separate Men/Women org exists for the current term (unlike some past terms, e.g. `Renew Men` id 3255 and `ReNew Women` id 3254, both status 40/past-term) — a gender split for Fall 2026 must be done via `People.GenderId` in the query, not by picking a different org.
+
+Related current-term orgs, not folded into the roster report unless asked: `ReNew F26 Closed Groups` (4133, TypeId 201, Active) and `ReNew Fall 26 Leaders` (4039, TypeId 207 = volunteer/leader tracking, Active).
+
+Deployed report: `renew-roster-report/AD_ReNewRosterReport.py` — see that folder's README for reuse instructions when a new term's org needs to be swapped in.
 
 ---
 
@@ -516,6 +533,8 @@ WHERE o.OrganizationName LIKE 'SM: CC %' OR o.OrganizationName LIKE 'SM: PS %'
 ORDER BY o.OrganizationName
 ```
 
+`Meetings.Canceled` and `Meetings.DidNotMeet` are separate bit-flag columns used elsewhere in this repo (`data-dictionary-expander/sql/focused/RPC_Children*.sql`) to exclude non-meetings from attendance rollups — pattern is `ISNULL(m.Canceled, 0) = 0 AND ISNULL(m.DidNotMeet, 0) = 0`. Not yet in the confirmed-column list above; carried forward here since `renew-roster-report/AD_ReNewRosterReport.py` also depends on it and hasn't had a live TouchPoint run yet to verify.
+
 Note: `OrgSchedule.SchedDay = 0` = Sunday (confirmed in original attendance query).
 This differs from `DATEPART(dw, ...)` where Sunday = 1 under `SET DATEFIRST 7`.
 The 2026-08-13 full profile observed values 0–6 plus special value 10. The meaning of 10 remains unconfirmed. Returned `SchedTime` values include a date component; compare or render only the time portion.
@@ -656,6 +675,7 @@ Pasting a `uniqueidentifier` literal into TouchPoint's SQL Script editor can tri
 | Python Scripts | SM_OutstandingTaskNotifications | Deployed, tested 2026-07-03 |
 | Python Scripts | SM_StaffTaskDashboard | Built, needs live TouchPoint test pass |
 | Python Scripts | RPC_StaffTaskDashboard | Built 2026-08-26, needs live TouchPoint test pass (STRING_AGG support unconfirmed) |
+| Python Scripts | AD_ReNewRosterReport | Built 2026-08-26, needs live TouchPoint test pass (`Meetings.Canceled`/`DidNotMeet` unconfirmed against this org). Printable Men/Women roster + weekly attendance grid for ReNew Fall 2026 (OrgId 3906) -- see `renew-roster-report/README.md`. |
 
 ---
 
