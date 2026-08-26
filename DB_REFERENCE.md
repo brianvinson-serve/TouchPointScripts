@@ -674,7 +674,8 @@ Pasting a `uniqueidentifier` literal into TouchPoint's SQL Script editor can tri
 | Python Scripts | SM_OutstandingTasksList | Not yet deployed |
 | Python Scripts | SM_OutstandingTaskNotifications | Deployed, tested 2026-07-03 |
 | Python Scripts | SM_StaffTaskDashboard | Built, needs live TouchPoint test pass |
-| Python Scripts | RPC_StaffTaskDashboard | Built 2026-08-26, needs live TouchPoint test pass (STRING_AGG support unconfirmed) |
+| Python Scripts | RPC_StaffTaskDashboard | Live-tested by Brian 2026-08-26; Alan reviewing. Reachable only via Special Content "run script" link -- not yet added as a page for other staff. |
+| Python Scripts | RPC_MyTaskBoard | Built 2026-08-26, needs live TouchPoint test pass (STRING_AGG support unconfirmed). Personal Kanban-style "my tasks" view, read-only v1 -- see `outstanding-task-notifications/dashboard/README.md`. |
 | Python Scripts | AD_ReNewRosterReport | Built 2026-08-26, needs live TouchPoint test pass. Generalized past ReNew-only: picks any active involvement from a configured division list (currently the two AD divisions; extensible to other ministries), Leader/Member-only roster (sorted Leaders first) + weekly attendance grid -- see `renew-roster-report/README.md`. |
 
 ---

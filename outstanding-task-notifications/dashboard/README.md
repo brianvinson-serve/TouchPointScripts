@@ -110,3 +110,57 @@ Read-only by design — no complete/reassign actions in this version. Every row 
 - The Ministry / Care & Assimilation / System keyword grouping is a judgment call, not a TouchPoint-native categorization — reasoning is in `DB_REFERENCE.md`.
 - `TP System` (PeopleId 33283) is a non-human integration account that owns open tasks; it's bucketed under a distinct "System Account" department rather than mixed into real staff numbers, and the dashboard banners it when present. Worth a look at what those tasks actually are.
 - Weston Watts (confirmed off staff) is bucketed `Unassigned` rather than removed, so any orphaned open tasks stay visible instead of disappearing.
+
+## Live status (2026-08-26)
+
+Live-tested by Brian; Alan is now reviewing it. Currently reachable only through Admin > Advanced > Special Content's "run script" link -- **not yet added as a page/nav link for other staff.** Revisit the caveats below once it is.
+
+---
+
+# RPC My Task Board
+
+Personal Kanban-style sibling of the two dashboards above. `RPC_MyTaskBoard.py` answers a different question than the church-wide/SM dashboards: "what does *my* queue look like right now," Trello-style, instead of a leadership rollup.
+
+## What it does
+
+Columns = `TaskNote.StatusId` (the only status-like field TaskNote has -- there is no native multi-stage/Kanban field, confirmed in `DB_REFERENCE.md`):
+
+- **To Do** (StatusId 2 / Pending)
+- **In Progress** (StatusId 3 / Active)
+- **Done** (StatusId 1 / Complete) -- last 14 days only, so the board doesn't fill up with completion history
+- **Declined** (StatusId 4) -- last 14 days, column hidden entirely when empty
+
+Cards are color-coded by task age using the same bucket labels/thresholds as `RPC_StaffTaskDashboard.py`'s detail view (New / Getting Stale / Needs a Nudge / Falling Behind / Backlogged / Forgotten), shown as both a left-border stripe and an age pill, plus a due-date pill and keyword-code chips. Every card links out to the about-person's TouchPoint profile.
+
+**Row-level security:** scoped to the logged-in user via `model.UserPeopleId`, the same pattern proven in `../TouchPointScripts/SM_OutstandingTasksList.py`. This is code-level filtering, not a TouchPoint permission feature.
+
+**v1 is read-only.** No drag-and-drop, no status write-back -- cards link to the native TouchPoint profile/task list for any action. A v2 that writes `StatusId` back on a column move is a deliberate follow-up requiring Brian's explicit sign-off and a rollback plan (per this repo's read-only-by-default rule).
+
+## Known gap before wider rollout
+
+The script accepts an optional `?pid=` query param (mirrors `SM_OutstandingTasksList.py`'s `Data.pid`) so Brian/admin can view another person's board for testing. **It is not role-gated** -- anyone who can reach the script URL and knows another PeopleId can currently view that person's board. That's an acceptable gap while this is only reachable via the admin "run script" link; it needs to be removed or replaced with a real role check before this is added as a general staff-facing nav page.
+
+## TouchPoint Deployment
+
+- Type: Python Script
+- TouchPoint path: `Admin > Advanced > Special Content > Python Scripts > +New`
+- Script name: `RPC_MyTaskBoard`
+- Source file: `outstanding-task-notifications/dashboard/RPC_MyTaskBoard.py`
+- Source data: `TaskNote`, `TaskNoteKeyword`, `Keyword`, `People`
+- Dependencies: TouchPoint runtime globals `model`, `q`, and `Data`
+
+## Test steps
+
+1. Create or update Python Script `RPC_MyTaskBoard` with the script contents.
+2. Run it while logged in as a staff member with open tasks -- confirm the board shows only that person's tasks (assignee if set, else owner).
+3. Confirm columns render as To Do / In Progress / Done, with Declined appearing only if that person has a recent declined task.
+4. Confirm card color/border matches age (spot-check one old task and one new task).
+5. Confirm the `STRING_AGG` keyword subquery doesn't error -- **needs live validation**, same caveat as `RPC_StaffTaskDashboard.py`.
+6. Test the `?pid=` admin override with a different PeopleId and confirm the "viewing via override" banner appears.
+7. Confirm card links open the right person's TouchPoint profile.
+
+## Expected caveats
+
+- Local validation only checked Python syntax (`py_compile`). The query, `STRING_AGG` usage, and rendered board still need live TouchPoint execution.
+- Not yet added as a page for staff -- reachable only via Special Content "run script" today. Close the `?pid=` gap above first.
+- Keyword chips show raw codes (e.g. `SG`, `CP`), not the fuller description/group labels `RPC_StaffTaskDashboard.py` uses -- kept intentionally lightweight since this view isn't filtering by task type.
