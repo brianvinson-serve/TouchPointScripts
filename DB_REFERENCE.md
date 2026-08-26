@@ -76,7 +76,7 @@ No separate Men/Women org exists for the current term (unlike some past terms, e
 
 Related current-term orgs, not folded into the roster report unless asked: `ReNew F26 Closed Groups` (4133, TypeId 201, Active) and `ReNew Fall 26 Leaders` (4039, TypeId 207 = volunteer/leader tracking, Active).
 
-Deployed report: `renew-roster-report/AD_ReNewRosterReport.py` — see that folder's README for reuse instructions when a new term's org needs to be swapped in.
+Deployed report: `renew-roster-report/AD_ReNewRosterReport.py` — a generic Leader/Member roster + attendance-grid report, not ReNew-specific. It picks its target involvement from a configured division list (`DIVISION_FILTERS`, currently Division 126 + 31 above) via an in-page picker rather than a hardcoded OrgId, so it already covers every active AD ReNew/Classes-Groups org, and is designed to extend to other ministries (e.g. Marriage Ministry classes) by adding their Division.Id once confirmed. See that folder's README for the extension recipe.
 
 ---
 
@@ -675,7 +675,7 @@ Pasting a `uniqueidentifier` literal into TouchPoint's SQL Script editor can tri
 | Python Scripts | SM_OutstandingTaskNotifications | Deployed, tested 2026-07-03 |
 | Python Scripts | SM_StaffTaskDashboard | Built, needs live TouchPoint test pass |
 | Python Scripts | RPC_StaffTaskDashboard | Built 2026-08-26, needs live TouchPoint test pass (STRING_AGG support unconfirmed) |
-| Python Scripts | AD_ReNewRosterReport | Built 2026-08-26, needs live TouchPoint test pass (`Meetings.Canceled`/`DidNotMeet` unconfirmed against this org). Printable Men/Women roster + weekly attendance grid for ReNew Fall 2026 (OrgId 3906) -- see `renew-roster-report/README.md`. |
+| Python Scripts | AD_ReNewRosterReport | Built 2026-08-26, needs live TouchPoint test pass. Generalized past ReNew-only: picks any active involvement from a configured division list (currently the two AD divisions; extensible to other ministries), Leader/Member-only roster (sorted Leaders first) + weekly attendance grid -- see `renew-roster-report/README.md`. |
 
 ---
 
