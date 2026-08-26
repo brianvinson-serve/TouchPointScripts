@@ -275,6 +275,7 @@ def department_sort_key(name):
 
 department_filter = get_param("dept", "all")
 group_filter = get_param("type", "all")
+keyword_filter = get_param("kw", "all")
 age_filter = get_param("age", "all")
 due_filter = get_param("due", "all")
 person_filter = get_param("person", "all")
@@ -286,6 +287,8 @@ if department_filter not in all_departments:
     department_filter = "all"
 if group_filter not in KEYWORD_GROUP_CHOICES:
     group_filter = "all"
+if keyword_filter not in KEYWORD_GROUPS:
+    keyword_filter = "all"
 if age_filter not in AGE_BUCKET_LABELS:
     age_filter = "all"
 if due_filter not in DUE_BUCKET_CHOICES:
@@ -395,6 +398,8 @@ def matches_filters(task):
     if department_filter != "all" and task["department"] != department_filter:
         return False
     if group_filter != "all" and group_filter not in task["keyword_groups"]:
+        return False
+    if keyword_filter != "all" and keyword_filter not in task["keyword_codes"]:
         return False
     if age_filter != "all" and task["age_bucket"] != age_filter:
         return False
@@ -531,6 +536,24 @@ def option_list(options, selected, all_label):
     return "\n".join(html)
 
 
+def keyword_options(selected):
+    html = ['<option value="all"{0}>All keywords</option>'.format(" selected" if selected == "all" else "")]
+    for group in ["Ministry", "Care & Assimilation", "System"]:
+        codes = sorted(
+            (c for c, (desc, g) in KEYWORD_GROUPS.items() if g == group),
+            key=lambda c: KEYWORD_GROUPS[c][0],
+        )
+        if not codes:
+            continue
+        html.append('<optgroup label="{}">'.format(html_escape(group)))
+        for code in codes:
+            desc = KEYWORD_GROUPS[code][0]
+            sel = " selected" if code == selected else ""
+            html.append('<option value="{0}"{1}>{2} ({0})</option>'.format(html_escape(code), sel, html_escape(desc)))
+        html.append('</optgroup>')
+    return "\n".join(html)
+
+
 def person_options(selected):
     html = ['<option value="all"{0}>All staff</option>'.format(" selected" if selected == "all" else "")]
     for pid, (name, dept) in sorted(ROSTER.items(), key=lambda kv: kv[1][0]):
@@ -541,12 +564,13 @@ def person_options(selected):
 
 print("""
   <div class="tabs">
-    <a href="?view=rollup&dept={dept}&type={type}&age={age}&due={due}&person={person}" class="{rollup_active}">Leadership Rollup</a>
-    <a href="?view=detail&dept={dept}&type={type}&age={age}&due={due}&person={person}" class="{detail_active}">Task Detail</a>
+    <a href="?view=rollup&dept={dept}&type={type}&kw={kw}&age={age}&due={due}&person={person}" class="{rollup_active}">Leadership Rollup</a>
+    <a href="?view=detail&dept={dept}&type={type}&kw={kw}&age={age}&due={due}&person={person}" class="{detail_active}">Task Detail</a>
   </div>
 """.format(
     dept=html_escape(department_filter),
     type=html_escape(group_filter),
+    kw=html_escape(keyword_filter),
     age=html_escape(age_filter),
     due=html_escape(due_filter),
     person=html_escape(person_filter),
@@ -563,8 +587,12 @@ print("""
         <select id="dept" name="dept">{dept_options}</select>
       </div>
       <div class="field">
-        <label for="type">Task type</label>
+        <label for="type">Task type (group)</label>
         <select id="type" name="type">{type_options}</select>
+      </div>
+      <div class="field">
+        <label for="kw">Keyword</label>
+        <select id="kw" name="kw">{kw_options}</select>
       </div>
       <div class="field">
         <label for="age">Age</label>
@@ -586,6 +614,7 @@ print("""
     view=html_escape(view_filter),
     dept_options=option_list(all_departments, department_filter, "All departments"),
     type_options=option_list(KEYWORD_GROUP_CHOICES, group_filter, "All types"),
+    kw_options=keyword_options(keyword_filter),
     age_options=option_list(AGE_BUCKET_LABELS, age_filter, "All ages"),
     due_options=option_list(DUE_BUCKET_CHOICES, due_filter, "All due dates"),
     person_options=person_options(person_filter),
