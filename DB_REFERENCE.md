@@ -1,5 +1,5 @@
 # TouchPoint Database Reference - RockPointe
-**Last Updated:** 2026-08-17
+**Last Updated:** 2026-08-25
 
 This doc captures confirmed IDs, table structures, and join patterns discovered
 by running queries against the live rockpointe.tpsdb.com instance.
@@ -109,13 +109,30 @@ WHERE dv.ProgId = 1109
 Task and notes table. NOT exposed via OData API - Python scripts only.
 
 Key StatusId values (from docs):
-- 1 = Complete (confirmed by existing task scripts; 8,240 current rows)
+- 1 = Complete
 - 2 = Pending
 - 3 = Active (Accepted)
 - 4 = Declined
-- 5 = Archived/note history (confirmed by existing task scripts; 103,938 current rows, all `IsNote = 1`)
+- 5 = Note (always `IsNote = 1`, not "archived" — see `IsArchived` correction below)
+
+**Correction, confirmed 2026-08-25 (StatusId × IsNote × IsArchived cross-tab, all ~113,427 rows):** the old "5 = Archived/note history" label conflated two different things. `IsArchived` is a **separate, independent bit flag**, not a value folded into `StatusId`. No `StatusId = 6` rows exist at RPC (unlike some other TouchPoint instances that do use 6 for Archived) — don't assume it's a valid value here without new evidence. `IsArchived = True` shows up on a small number of rows at *every* `StatusId`, including nominally-open ones: of 426 tasks matching `StatusId IN (2,3)`, 10 (2 Pending + 8 Accepted) are already `IsArchived = True`. An "open task" filter that doesn't also exclude `IsArchived = True` will surface tasks staff already archived as if they're still live. Confirmed full distribution:
+
+| StatusId | IsNote | IsArchived | RowCount |
+|---|---|---|---:|
+| 1 | False | False | 8,536 |
+| 1 | False | True | 4 |
+| 2 | False | False | 237 |
+| 2 | False | True | 2 |
+| 3 | False | False | 179 |
+| 3 | False | True | 8 |
+| 4 | False | False | 52 |
+| 4 | False | True | 3 |
+| 5 | True | False | 51,172 |
+| 5 | True | True | 53,234 |
 
 Key columns: `TaskNoteId`, `OwnerId`, `AssigneeId`, `AboutPersonId`, `StatusId`, `Instructions`, `DueDate`, `IsNote`, `OrgId`, `SourceTaskNoteId`
+
+Confirmed 2026-08-13 full column inventory (not all previously documented): `TaskNoteId`, `CreatedBy`, `CreatedDate`, `ModifiedBy`, `ModifiedDate`, `CompletedBy`, `CompletedDate`, `DueDate`, `IsNote`, `IsArchived`, `StatusId`, `OwnerId`, `AssigneeId`, `AboutPersonId`, `RoleId`, `Instructions`, `Notes`, `OrgId`, `SourceTaskNoteId`, `DeclinedReason`, `ReminderSent`, `SortDate`. `IsArchived` is a separate bit flag from `StatusId` — do not assume `StatusId` alone tells you archived state; `CompletedDate`/`CompletedBy` are the fields to use for completion-rate/turnaround reporting (e.g. `DATEDIFF(day, CreatedDate, CompletedDate)`), not a derived value.
 
 Confirmed schema pitfall: RPC's `TaskNote` table does **not** expose a column literally named `Id`. Its declared primary key is `TaskNoteId`. Do not select `tn.Id AS TaskNoteId`; it causes `Invalid column name 'Id'` and can blank Python report output before rendering. Select `tn.TaskNoteId` when the task/note key is needed.
 
@@ -132,6 +149,79 @@ Confirmed 2026-08-13 declared relationships:
 Observed structural scale on 2026-08-13: approximately 112,877 `TaskNote` rows. The separate legacy-looking `Task` table exists but had an approximate row count of 0; do not substitute it for `TaskNote` in current RPC reports without new evidence.
 
 `IsNote`: 1 = note/history, 0 = task in the 2026-08-13 full aggregate. No NULL `IsNote` rows were observed. Existing task filters may retain `(IsNote = 0 OR IsNote IS NULL)` defensively for compatibility, but the previous claim that tasks currently store NULL was disproven by the full-table profile.
+
+### TaskNote Keywords (task-type taxonomy) — confirmed 2026-08-25
+
+TaskNote has a native task-type/tagging mechanism: `Keyword` (lookup table, 47 rows in the 2026-08-13 structural export) joined through `TaskNoteKeyword` (`TaskNoteId`, `KeywordId`, `TaskNoteKeywordId` PK; 27,725 rows). A task can carry more than one keyword. This is **already in active use at RPC**, not a greenfield feature — do not assume "task type" needs to be invented.
+
+Confirmed live usage counts (2026-08-25, all `IsActive = 1`), highest-use first:
+
+| Code | Description | Usage |
+|---|---|---:|
+| SG | Small Groups | 6,823 |
+| CP | Care | 3,523 |
+| CO | Connections | 3,352 |
+| FTV | First Time Visitor | 3,005 |
+| SM | Student Ministry | 2,111 |
+| AD2 | Mid-Gen/Senior Adult | 1,322 |
+| CM | Children's Ministry | 1,111 |
+| Pray | Prayer Request | 1,105 |
+| WM | Women's Ministry | 842 |
+| Serve | Volunteering | 755 |
+| MEN | Men's Ministry | 568 |
+| PR5002 | Include in Prayer Feed | 429 |
+| Mmbshp | Membership | 412 |
+| Failed Gift | Failed Gift | 341 |
+| DWP | Dinner with the Pastor | 334 |
+| Grief | Grief | 271 |
+| DX | Deacons | 267 |
+| Bap | Baptism | 241 |
+| MS | Missions | 230 |
+| YA | Young Adult | 149 |
+| AD | Adult Discipleship | 131 |
+| PR5003 | Anonymous Prayer Request | 129 |
+| PR5000 | Mobile Prayer Request | 90 |
+| MM | Marriage Ministry | 90 |
+| Beg w/God | Beginning a Relationship with God | 79 |
+| WO | Worship Ministry | 60 |
+| ERmvd | Staff email removed | 53 |
+| RRmvd | Staff System Roles Removed | 50 |
+| NLStaff | Note - no longer on staff | 45 |
+| Hosp. | Hospital | 26 |
+| Fix-It | Fix It Ministry (Facilities) | 21 |
+| SN | Special Needs | 18 |
+| SG1 | Prospect | 17 |
+| FTGN | FTG Note | 16 |
+| SNed | See Ned | 15 |
+| TN0609 | Account Deletion Requested | 14 |
+| PR5001 | Prayer Request Unauthenticated | 12 |
+| CA | Caution/Concern | 9 |
+| DE | Deceased | 9 |
+| RFI | Removed From Involvements | 8 |
+| OP | Operations | 7 |
+| PM | Parenting | 2 |
+| SA | See Alan | 2 |
+| RFAI | Removed From Additional Involvements | 1 |
+| FOUP | Follow Up Marlene | 1 |
+| Cmpltd | Completed | 1 |
+| RR | Remove Access Role | 0 |
+
+**Not a clean department taxonomy — it's three different kinds of tag mixed in one flat list:**
+1. **Ministry/department tags** (16): SG, SM, AD2, CM, WM, MEN, MS, YA, AD, MM, WO, Fix-It, OP, PM, DX, SN — usable as a ministry-context filter. Cross-checked against the live RockPointe staff directory (`https://www.rockpointechurch.org/staff/department/all-staff`, 2026-08-26): all 16 correspond to a real named department (e.g. `SN` = Special Needs Ministry — corrected here 2026-08-26; an earlier pass omitted it from this list).
+2. **Care/assimilation workflow tags** (22): CP, CO, FTV, Pray, PR5000, PR5001, PR5002, PR5003, Grief, Bap, Beg w/God, Hosp., CA, DE, SNed, SA, FOUP, Serve, Mmbshp, DWP, SG1, FTGN — pastoral-care/assimilation pipeline stages, not departments. These dominate total volume (SG/CP/CO/FTV alone are ~17,700 of the 27,725 tagged rows), so a naive "top keyword" chart will read as an assimilation-pipeline report, not a staff-task report.
+3. **System/housekeeping tags** (9): Failed Gift, ERmvd, RRmvd, NLStaff, RFI, RFAI, RR, TN0609, Cmpltd — look auto-generated by TouchPoint account/role-maintenance processes, not staff-assigned. Worth excluding from a staff-facing task-type filter, or grouping under a single "System" bucket.
+
+This 16/22/9 = 47 grouping is implemented as `KEYWORD_GROUPS` in `outstanding-task-notifications/dashboard/RPC_StaffTaskDashboard.py`. Keep that dict and this note in sync if new Keyword rows are added at RPC.
+
+Do not treat Keyword as the sole department axis for a staff task dashboard — it tells you what a task is *about*, not reliably who owns it or what department that person sits in. Pair it with owner identity (see `MemberTags`/`OrgMemMemTags` below) for a "by department" staff rollup.
+
+**`TaskNote.OrgId` is not usable as a ministry-context signal — confirmed 2026-08-25.** Live query against all 426 currently-open (`StatusId IN (2,3)`, non-note) tasks found `OrgId IS NOT NULL` on **0 of 426**. Nobody at RPC ties a task to an involvement in practice. Do not build a "task's ministry via `OrgId -> DivOrg -> Division -> Program`" join — it will return nothing. The ministry-tag subset of Keyword (above) is currently the only per-task ministry signal; owner identity (via `MemberTags`/`OrgMemMemTags`, pending confirmation) is the other, independent axis for a "by department" rollup.
+
+### MemberTags / OrgMemMemTags (native SubGroups feature)
+
+TouchPoint's involvement-level "SubGroups" tagging: `MemberTags` (`Id` PK, `Name`, `OrgId -> Organizations`, plus check-in/volunteer-scheduling columns `VolFrequency`, `VolStartDate`, `VolEndDate`, `CheckIn`, `CheckInCapacity`, `ScheduleId`) and `OrgMemMemTags` (composite PK `OrgId`+`PeopleId`+`MemberTagId`, plus `IsLeader` bit) linking a person's membership in a specific involvement to one or more tags on that involvement. Confirmed 2026-08-13 structural scale: `MemberTags` ~7,064 rows, `OrgMemMemTags` ~50,601 rows — heavily used at RPC already.
+
+**Confirmed 2026-08-25: no department-style usage exists.** Queried every `%Staff%`/`%Team%`-named involvement's MemberTags live. Every result is event-RSVP options or volunteer-scheduling slots — e.g. `AP: Staff Social Styles` ("Will attend:"/"Unable to attend"), `Staff Women` (retreat attendance options), `CM:Childcare for Staff Kids Summer 26` (specific summer dates), `Health and Safety Team` / `SM: Servant Leadership Team` / `YA: Serve Team Interest Form` (serving positions like Floater, Welcome, Cashier 1). None of these are a church-wide staff department roster. Do not build a "department via MemberTags" join expecting existing data — there isn't any. A church-wide staff-by-department dashboard should use a hardcoded PeopleId → Department roster maintained in the script (extending the existing `SM Staff` / `SM_STAFF` pattern church-wide) rather than waiting on new TouchPoint admin setup for this.
 
 ### OrganizationMembers
 Links people to involvements.
@@ -486,6 +576,8 @@ Pasting a `uniqueidentifier` literal into TouchPoint's SQL Script editor can tri
 | SQL Scripts | SM_TaskNote-ToDo | Deployed, filter still being tuned |
 | Python Scripts | SM_OutstandingTasksList | Not yet deployed |
 | Python Scripts | SM_OutstandingTaskNotifications | Deployed, tested 2026-07-03 |
+| Python Scripts | SM_StaffTaskDashboard | Built, needs live TouchPoint test pass |
+| Python Scripts | RPC_StaffTaskDashboard | Built 2026-08-26, needs live TouchPoint test pass (STRING_AGG support unconfirmed) |
 
 ---
 
