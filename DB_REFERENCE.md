@@ -666,6 +666,23 @@ Pasting a `uniqueidentifier` literal into TouchPoint's SQL Script editor can tri
 
 ---
 
+## Native Duplicate/Merge Tables — confirmed 2026-08-26
+
+Discovered via the 2026-08-13 structural export while researching a fuzzy-duplicate-finder tool (roundtable topic at the 2026-08-26 TouchPoint summit). TouchPoint has its own native duplicate-detection and merge pipeline at RPC — do not assume this is greenfield before building duplicate-related tooling.
+
+| Table | Role | Approx. rows (2026-08-13) |
+|---|---|---:|
+| `dbo.Duplicate` | Candidate duplicate pairs. Composite PK (`id1`, `id2`), both `int` -> presumably `People.PeopleId`, not yet confirmed live. | ~21 |
+| `dbo.DuplicatesRun` | History of the native duplicate-finder job runs. Columns: `id`, `started`, `count`, `processed`, `found`, `completed`, `error`, `running`. | ~32 |
+| `dbo.MergeHistory` | Log of actual merges performed. Columns: `FromId`, `ToId`, `FromName`, `ToName`, `Dt`, `WhoName`, `WhoId`, `Action`. PK `FromId`. | ~3,839 |
+| `People.HasDuplicates` | `bit` flag TouchPoint sets on a People record. Already used as a review signal in the RPC staff-directory export (`REVIEW_PERSON_DUPLICATE_FLAG`). | n/a |
+
+Only ~21 open candidate pairs is low relative to the roundtable's "a ton of duplicates coming through registrations" complaint. Per Brian, the native finder does not catch nickname variants (e.g. "Jonathan" vs "Johnny" vs "Jon") — it appears to key on close/exact name matches, not a nickname-aware or general fuzzy match. Not yet confirmed: whether `DuplicatesRun` is scheduled/run regularly at RPC, or what its exact matching criteria are.
+
+**Deployed gap-filler report:** `duplicate-finder/TP_DuplicatePersonFinder.py` (renamed 2026-08-27 from `RPC_DuplicatePersonFinder` — no RPC-specific IDs/names in it, portable to any TouchPoint church, so it got a generic `TP_` name instead of this repo's RPC-specific-script prefix) — read-only, nickname-aware + fuzzy-string audit report scoped to recently-created People records, explicitly excluding pairs already in `dbo.Duplicate`. Never merges; links out to TouchPoint's own profile/merge UI. See that folder's README for full design and pending live-validation items (notably `lookup.Origin` mapping to scope the "recent" set to registration-created records specifically, and SOUNDEX-blocking performance at RPC's live table size).
+
+---
+
 ## Special Content - Deployed Scripts
 
 | Tab | Name | Status |
@@ -677,6 +694,7 @@ Pasting a `uniqueidentifier` literal into TouchPoint's SQL Script editor can tri
 | Python Scripts | RPC_StaffTaskDashboard | Live-tested by Brian 2026-08-26; Alan reviewing. Reachable only via Special Content "run script" link -- not yet added as a page for other staff. |
 | Python Scripts | RPC_MyTaskBoard | Built 2026-08-26, needs live TouchPoint test pass (STRING_AGG support unconfirmed). Personal Kanban-style "my tasks" view, read-only v1 -- see `outstanding-task-notifications/dashboard/README.md`. |
 | Python Scripts | AD_ReNewRosterReport | Built 2026-08-26, needs live TouchPoint test pass. Generalized past ReNew-only: picks any active involvement from a configured division list (currently the two AD divisions; extensible to other ministries), Leader/Member-only roster (sorted Leaders first) + weekly attendance grid -- see `renew-roster-report/README.md`. |
+| Python Scripts | TP_DuplicatePersonFinder (was RPC_DuplicatePersonFinder, renamed 2026-08-27 -- generic-portable, no RPC-specific IDs) | Live-tested by Brian 2026-08-26/27 (2026 summit roundtable follow-up), judged a clear improvement after performance and household-false-positive fixes. Read-only nickname-aware + fuzzy duplicate-person audit report, scoped to recently-created People, excludes pairs already in native `dbo.Duplicate` -- see `duplicate-finder/README.md`. |
 
 ---
 
