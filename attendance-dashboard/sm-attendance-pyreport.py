@@ -41,6 +41,7 @@ DECLARE @WednesdayDivId   INT          = 42
 DECLARE @StudentTypeId    INT          = 201
 DECLARE @VolunteerTypeId  INT          = 207
 DECLARE @WedGradeTypeId   INT          = 205
+DECLARE @GuestTypeId      INT          = 310
 DECLARE @StartDate        DATE         = '{start}'
 DECLARE @EndDate          DATE         = '{end}'
 DECLARE @IncludeSunday    BIT          = {sun}
@@ -104,7 +105,14 @@ SELECT
             THEN 'D-Groups'
         ELSE 'Other'
     END,
-    Attendance = ISNULL(m.NumPresent, 0)
+    Attendance = ISNULL(m.NumPresent, 0),
+    Guests = ISNULL((
+        SELECT COUNT(*)
+        FROM dbo.Attend att
+        WHERE att.MeetingId = m.MeetingId
+          AND ISNULL(att.AttendanceFlag, 0) = 1
+          AND att.MemberTypeId = @GuestTypeId
+    ), 0)
 
 FROM dbo.Organizations o
 
@@ -141,9 +149,18 @@ JOIN dbo.Meetings m
 
 WHERE
     o.OrganizationStatusId = 30
+    AND o.OrganizationName <> 'SM: SLT 26-27'
     AND (
         o.OrganizationName LIKE @CCPrefix + '%'
         OR o.OrganizationName LIKE @PSPrefix + '%'
+        -- D-Group orgs don't all follow the 'SM: CC '/'SM: PS ' naming convention
+        -- (e.g. "SM: Identity: Daughters of the King ...", "SM: Man Up ...") --
+        -- include any Wednesday-division org regardless of name so these aren't
+        -- silently dropped. Sunday-side inclusion is unaffected.
+        OR EXISTS (
+            SELECT 1 FROM dbo.DivOrg dwn
+            WHERE dwn.OrgId = o.OrganizationId AND dwn.DivId = @WednesdayDivId
+        )
     )
     AND (
            @CampusFilter = 'ALL'
@@ -219,6 +236,7 @@ for r in q.QuerySql(sql):
             "OrganizationName": str(r.OrganizationName or ""),
             "Category": str(r.Category or "Sunday"),
             "Attendance": int(r.Attendance or 0),
+            "Guests": int(r.Guests or 0),
         }
     )
 
@@ -278,26 +296,24 @@ td.col-label{text-align:left}
 td.col-total{font-weight:600}
 td.col-avg{color:#718096}
 .zero{color:#e2e8f0}
-tr.r-campus td{background:#dbeafe;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-bottom:1px solid #bfdbfe}
-tr.r-campus td.col-label{padding-left:12px}
-tr.r-school td{background:#f0fdf4;font-weight:600;border-bottom:1px solid #dcfce7}
-tr.r-school td.col-label{padding-left:20px}
-tr.r-detail td{background:white}
-tr.r-detail td.col-label{padding-left:36px;color:#2d3748}
-tr.r-offhour td{background:#fafafa}
-tr.r-offhour td.col-label{padding-left:36px;color:#718096;font-style:italic}
-tr.r-subtotal td{background:#dbeafe;font-weight:600;border-top:1px solid #bfdbfe;border-bottom:1px solid #bfdbfe}
-tr.r-subtotal td.col-label{padding-left:20px}
-tr.r-campus-total td{background:#bfdbfe;font-weight:700;border-top:2px solid #93c5fd;border-bottom:2px solid #93c5fd}
-tr.r-campus-total td.col-label{padding-left:12px}
-tr.r-vol-header td{background:#fffbeb;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-top:4px solid #e2e8f0;border-bottom:1px solid #fde68a}
-tr.r-vol-campus td{background:#fefce8;font-weight:600}
-tr.r-vol-campus td.col-label{padding-left:20px}
-tr.r-vol-detail td{background:white}
-tr.r-vol-detail td.col-label{padding-left:36px}
-tr.r-vol-subtotal td{background:#fef9c3;font-weight:600}
-tr.r-vol-subtotal td.col-label{padding-left:20px}
+/* One neutral hierarchy for every section (Sunday/D-Groups x Students/Volunteers):
+   r-top = section header, r-node = a grouping level (e.g. Campus, School),
+   r-total = that group's subtotal, r-leaf = a detail row, r-grand = the section's
+   final rollup. Depth (d1/d2/d3) controls indentation only, independent of kind,
+   so every section shares the same visual language regardless of its shape. */
+tr.r-top td{background:#1e293b;color:white;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-top:4px solid #e2e8f0}
+tr.r-top td.col-label{padding-left:10px}
+tr.r-node td{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding:6px 10px}
+tr.d1.r-node td{background:#e2e8f0}
+tr.d2.r-node td{background:#eef2f6}
+tr.r-total td{background:#dbeafe;font-weight:700;border-top:1px solid #bfdbfe;border-bottom:1px solid #bfdbfe}
+tr.r-leaf td{background:white;color:#2d3748}
+tr.r-leaf-alt td{background:#fafafa;color:#718096;font-style:italic}
+tr.d1 td.col-label{padding-left:14px}
+tr.d2 td.col-label{padding-left:22px}
+tr.d3 td.col-label{padding-left:36px}
 tr.r-grand td{background:#1a365d;color:white;font-weight:700;font-size:13px;padding:8px 10px;border-top:2px solid #2b6cb0}
+tr.r-grand td.col-label{padding-left:10px}
 tr.r-grand td.col-avg{color:rgba(255,255,255,.65)}
 tr.r-spacer td{height:6px;background:#f0f4f8;border:none}
 .empty-state{padding:60px;text-align:center;color:#a0aec0;background:white}
@@ -507,101 +523,94 @@ function renderTable(data,dates) {
   }).join('');
 }
 
+// One config entry per section. `levels` declares which grouping tiers apply --
+// 'campus' then optionally 'school' -- so the SAME render loop below produces
+// every section's shape instead of a hand-built block per section.
+var SECTIONS=[
+  {category:'Sunday',   personType:'Students',   label:'Sunday Students',    levels:['campus','school']},
+  {category:'D-Groups', personType:'Students',   label:'D-Groups',           levels:[]},
+  {category:'Sunday',   personType:'Volunteers', label:'Sunday Volunteers',  levels:['campus']},
+  {category:'D-Groups', personType:'Volunteers', label:'D-Group Volunteers', levels:[]},
+];
+
 function buildRows(data,dates,n) {
   var rows=[];
-  var campuses=[...new Set(data.map(function(r){return r.Campus;}))].filter(Boolean).sort();
   var showS=S.personType==='Students'||S.personType==='all';
   var showV=S.personType==='Volunteers'||S.personType==='all';
   var showSun=S.dayOfWeek==='all'||S.dayOfWeek==='Sunday';
   var showWed=S.dayOfWeek==='all'||S.dayOfWeek==='Wednesday';
 
-  if(showS&&showSun){
-    var sd=data.filter(function(r){return r.PersonType==='Students'&&r.Category==='Sunday';});
-    var sunCampuses=[...new Set(sd.map(function(r){return r.Campus;}))].filter(Boolean).sort();
-    for(var ci=0;ci<sunCampuses.length;ci++){
-      var campus=sunCampuses[ci];
-      var cd=sd.filter(function(r){return r.Campus===campus;});
-      if(!cd.length)continue;
-      rows.push(mk('campus',campus,cd,dates,n));
-      var sls=['Middle School','High School'];
-      for(var si=0;si<sls.length;si++){
-        var sl=sls[si];
-        if(S.schoolLevel!=='all'&&S.schoolLevel!==sl)continue;
-        var sld=cd.filter(function(r){return r.SchoolLevel===sl;});
-        if(!sld.length)continue;
-        rows.push(mk('school',sl,sld,dates,n));
-        var combos=gradeCombos(sld);
-        for(var gi=0;gi<combos.length;gi++){
-          var grade=combos[gi][0],gender=combos[gi][1];
-          var dd=sld.filter(function(r){return r.Grade===grade&&r.Gender===gender;});
-          if(!dd.length)continue;
-          rows.push(mk('detail',gender?grade+' '+gender:grade,dd,dates,n));
+  SECTIONS.forEach(function(cfg){
+    if(cfg.category==='Sunday'   && !showSun) return;
+    if(cfg.category==='D-Groups' && !showWed) return;
+    if(cfg.personType==='Students'   && !showS) return;
+    if(cfg.personType==='Volunteers' && !showV) return;
+
+    var subset=data.filter(function(r){return r.PersonType===cfg.personType && r.Category===cfg.category;});
+    if(!subset.length) return;
+
+    if(rows.length) rows.push({type:'spacer'});
+    rows.push(mk('top',cfg.label,subset,dates,n));
+
+    var hasCampus=cfg.levels.indexOf('campus')>=0;
+    var hasSchool=cfg.levels.indexOf('school')>=0;
+    var topGroups=hasCampus
+      ? [...new Set(subset.map(function(r){return r.Campus;}))].filter(Boolean).sort()
+      : [null];
+
+    for(var gi=0;gi<topGroups.length;gi++){
+      var groupKey=topGroups[gi];
+      var gd=hasCampus ? subset.filter(function(r){return r.Campus===groupKey;}) : subset;
+      if(!gd.length) continue;
+      if(hasCampus) rows.push(mk('node d1',groupKey,gd,dates,n));
+
+      if(hasSchool){
+        var sls=['Middle School','High School'];
+        for(var si=0;si<sls.length;si++){
+          var sl=sls[si];
+          if(S.schoolLevel!=='all'&&S.schoolLevel!==sl)continue;
+          var sld=gd.filter(function(r){return r.SchoolLevel===sl;});
+          if(!sld.length)continue;
+          rows.push(mk('node d2',sl,sld,dates,n));
+          var combos=gradeCombos(sld);
+          for(var ci=0;ci<combos.length;ci++){
+            var grade=combos[ci][0],gender=combos[ci][1];
+            var dd=sld.filter(function(r){return r.Grade===grade&&r.Gender===gender;});
+            if(!dd.length)continue;
+            rows.push(mk('leaf d3',gender?grade+' '+gender:grade,dd,dates,n));
+          }
+          rows.push(mk('total d2',sl+' Total',sld,dates,n));
         }
-        rows.push(mk('subtotal',sl+' Total',sld,dates,n));
-      }
-      if(S.schoolLevel==='all'){
-        var od=cd.filter(function(r){return r.SchoolLevel==='Other'||(r.PersonType==='Students'&&!r.SchoolLevel);});
-        if(od.length){
-          var orgs=[...new Set(od.map(function(r){return r.OrganizationName;}))].sort();
-          for(var oi=0;oi<orgs.length;oi++){
-            var org=orgs[oi];
-            rows.push(mk('offhour',shortName(org),od.filter(function(r){return r.OrganizationName===org;}),dates,n));
+        if(S.schoolLevel==='all'){
+          var od=gd.filter(function(r){return r.SchoolLevel==='Other'||!r.SchoolLevel;});
+          if(od.length){
+            var oorgs=[...new Set(od.map(function(r){return r.OrganizationName;}))].sort();
+            for(var ooi=0;ooi<oorgs.length;ooi++){
+              var oorg=oorgs[ooi];
+              rows.push(mk('leaf-alt d2',shortName(oorg),od.filter(function(r){return r.OrganizationName===oorg;}),dates,n));
+            }
           }
         }
-      }
-      rows.push(mk('campus-total',campus+' Students',cd,dates,n));
-    }
-    if(sunCampuses.length>1&&S.campus==='all'){
-      rows.push(mk('grand','Grand Total (Students)',sd,dates,n));
-    }
-  }
-
-  if(showS&&showWed){
-    var dg=data.filter(function(r){return r.PersonType==='Students'&&r.Category==='D-Groups';});
-    if(dg.length){
-      if(rows.length)rows.push({type:'spacer'});
-      rows.push(mk('vol-header','D-Groups',dg,dates,n));
-      var dgCampuses=[...new Set(dg.map(function(r){return r.Campus;}))].filter(Boolean).sort();
-      for(var dc=0;dc<dgCampuses.length;dc++){
-        var dgCampus=dgCampuses[dc];
-        var dgcd=dg.filter(function(r){return r.Campus===dgCampus;});
-        if(!dgcd.length)continue;
-        rows.push(mk('vol-campus',dgCampus,dgcd,dates,n));
-        var dgorgs=[...new Set(dgcd.map(function(r){return r.OrganizationName;}))].sort();
-        for(var doi=0;doi<dgorgs.length;doi++){
-          var dgo=dgorgs[doi];
-          rows.push(mk('vol-detail',shortName(dgo),dgcd.filter(function(r){return r.OrganizationName===dgo;}),dates,n));
+      } else {
+        var orgs=[...new Set(gd.map(function(r){return r.OrganizationName;}))].sort();
+        var leafDepth=hasCampus?'d2':'d1';
+        for(var oi=0;oi<orgs.length;oi++){
+          var org=orgs[oi];
+          rows.push(mk('leaf '+leafDepth,shortName(org),gd.filter(function(r){return r.OrganizationName===org;}),dates,n));
         }
-        rows.push(mk('vol-subtotal',dgCampus+' Total',dgcd,dates,n));
       }
-      if(dgCampuses.length>1&&S.campus==='all'){
-        rows.push(mk('grand','D-Groups Total',dg,dates,n));
-      }
-    }
-  }
 
-  if(showV){
-    var vd=data.filter(function(r){return r.PersonType==='Volunteers';});
-    if(vd.length){
-      rows.push({type:'spacer'});
-      rows.push(mk('vol-header','Volunteers',vd,dates,n));
-      for(var vc=0;vc<campuses.length;vc++){
-        var vcampus=campuses[vc];
-        var cvd=vd.filter(function(r){return r.Campus===vcampus;});
-        if(!cvd.length)continue;
-        rows.push(mk('vol-campus',vcampus,cvd,dates,n));
-        var vorgs=[...new Set(cvd.map(function(r){return r.OrganizationName;}))].sort();
-        for(var voi=0;voi<vorgs.length;voi++){
-          var vo=vorgs[voi];
-          rows.push(mk('vol-detail',shortName(vo),cvd.filter(function(r){return r.OrganizationName===vo;}),dates,n));
-        }
-        rows.push(mk('vol-subtotal',vcampus+' Total',cvd,dates,n));
-      }
-      if(campuses.length>1&&S.campus==='all'){
-        rows.push(mk('grand','Volunteer Total',vd,dates,n));
-      }
+      if(hasCampus) rows.push(mk('total d1',groupKey+' Total',gd,dates,n));
     }
-  }
+
+    var showGrand=hasCampus
+      ? topGroups.length>1
+      : (new Set(subset.map(function(r){return r.OrganizationName;}))).size>1;
+    if(showGrand){
+      rows.push(mk('grand',cfg.label+' Total',subset,dates,n));
+    }
+  });
+
   return rows;
 }
 
@@ -641,7 +650,7 @@ function shortName(org){
 
 function exportCSV(){
   var data=filtered();
-  var cols=['Campus','PersonType','SchoolLevel','Grade','Gender','DayOfWeek','MeetingDate','OrganizationName','Category','Attendance'];
+  var cols=['Campus','PersonType','SchoolLevel','Grade','Gender','DayOfWeek','MeetingDate','OrganizationName','Category','Attendance','Guests'];
   var csv=[cols.join(',')].concat(data.map(function(r){return cols.map(function(c){return JSON.stringify(r[c]!=null?r[c]:'');}).join(',');})).join('\\n');
   var a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));

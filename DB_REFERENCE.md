@@ -396,6 +396,63 @@ Church-wide `PeopleId -> Department` mapping, for the department axis of the `RP
 
 Correction from the 2026-08-13 focused export: the old note describing 220 as Leader/volunteer and 136 as Substitute was wrong. Use 140 for the global Leader member type. Do not infer a person's ministry role from `MemberTypeId` without considering the organization context.
 
+**`lookup.MemberType` schema confirmed live 2026-08-27** (`SELECT * FROM lookup.MemberType ORDER BY Id`): columns are `Id`, `Code`, `Description`, `AttendanceTypeId`, `Hardwired`, `Pending`, `Inactive`. Full table as returned (not all rows appear in `Attend`/`OrganizationMembers` usage above -- this is the complete lookup, not just observed usage):
+
+| Id | Code | Description | AttendanceTypeId | Hardwired | Pending | Inactive |
+|----|------|--------------|------------------:|-----------|---------|----------|
+| 103 | DR | Director | 10 | | False | False |
+| 104 | ED | Elder/Deacon Team | 30 | | False | False |
+| 130 | CH | Chairman | 30 | | False | False |
+| 136 | CC | Coach | 10 | | False | False |
+| 140 | L | Leader | 10 | | False | False |
+| 160 | T | Teacher | 10 | True | False | False |
+| 161 | AT | Assistant Teacher | 10 | | False | False |
+| 162 | SC | Secretary | 10 | | False | False |
+| 170 | IR | In Reach Leader | 10 | | False | False |
+| 172 | OR | Outreach Leader | 10 | | False | False |
+| 220 | M | Member | 30 | True | False | False |
+| 230 | IA | InActive | 40 | True | False | True |
+| 300 | VM | Visiting Member | 30 | True | False | False |
+| 310 | G | Guest | 60 | True | False | False |
+| 311 | PR | Prospect | 190 | True | True | False |
+| 415 | HB | Homebound | 100 | | False | False |
+| 500 | IM | In-Service Member | 70 | True | False | False |
+| 700 | VI | VIP | 20 | True | False | False |
+| 710 | VL | Volunteer | 20 | | False | False |
+
+`MemberTypeId = 310` (Guest) is the key one for weekly attendance reporting -- see the SM Wednesdays / D-Groups section below.
+
+---
+
+## SM Wednesdays / D-Groups — confirmed 2026-08-27
+
+Live weekly snapshot (Sunday 2026-08-23 through Saturday 2026-08-29, `Attend.AttendanceFlag = 1`, meetings not `Canceled`/`DidNotMeet`), gathered while reworking `sm-attendance-pyreport.py` to handle D-Groups differently from Sunday.
+
+**TypeId 106 is not a live D-Group signal.** Every active Wednesday D-Group org this week (Division 42 = SM Wednesdays) is `OrganizationTypeId` `201` (grade/topic classes, e.g. "SM: PS 10th Grade Apologetics F26-S27") or `207` (`SM: PS D Groups Leaders 2026-2027`) -- the same TypeIds already used for Sunday. The one org observed with TypeId `106` ("SM: CC Basics for Students") sits in Division 12 (SM Classes), not Division 42, and had zero attendance. Do not use TypeId 106 as a D-Group filter; `201`/`207` on Division 42 is confirmed correct.
+
+**The real Sunday-vs-Wednesday difference is Guest attendance, not volunteers.** A per-meeting `Attend.MemberTypeId` breakdown for this week's D-Group orgs (query joined `Attend` -> `Meetings` -> `Organizations`, grouped by org + `MemberTypeId`) showed nearly all non-`220` attendance is `MemberTypeId = 310` (Guest), not `140`/`710` (Leader/Volunteer):
+
+| OrganizationId | OrganizationName | 220 (Member) | 310 (Guest) |
+|---|---|---:|---:|
+| 4058 | SM: Identity: Daughters of the King 9th Grade Girls 2026-2027 | 31 | 3 |
+| 4052 | SM: Man Up 9th Grade Guys 2026-2027 | 23 | 0 |
+| 4047 | SM: PS 10th Grade Apologetics F26-S27 | 17 | 14 |
+| 4050 | SM: PS 11th Grade Systematic Theology F26-S27 | 16 | 9 |
+| 4051 | SM: PS 12th Grade Biblical Worldview F26-S27 | 23 | 18 |
+| 4044 | SM: PS 6th Grade Alpha F26-S27 | 30 | 2 |
+| 4046 | SM: PS 7th Grade New Testament F26-S27 | 30 | 13 |
+| 4048 | SM: PS 8th Grade Inductive Bible Study F26-S27 | 22 (+2 as `140`) | 12 |
+| 4060 | SM: PS D Groups Leaders 2026-2027 | 47 | 6 |
+| 1943 | SM: PS Health and Safety | 2 | 0 |
+
+`MemberTypeId = 310` attendance ran roughly 30-45% of total attendance on several D-Group classes this week (e.g. 18 of 41 on "PS 12th Grade Biblical Worldview," 14 of 31 on "PS 10th Grade Apologetics"). Sunday grade orgs the same week were almost entirely `MemberTypeId = 220`, with only single-digit stray `140`s.
+
+**Correction, confirmed 2026-08-27 (name-level spot-check by Brian, then verified against `OrganizationMembers` for all 77 `MemberTypeId = 310` attendance rows across this week's D-Group meetings):** the "not formally rostered on this org" theory is wrong. **71 of 77 (92%) of the `310`-flagged people ARE already enrolled (`OrganizationMembers`) on the exact org they attended.** This is not a visitor signal and not a drop-in-from-another-org signal — it's enrolled students and leaders whose `Attend` row is getting the wrong `MemberTypeId` at check-in. Age breakdown: 63 students (ages 11-18), 12 adults (ages 40-59), 2 unresolved. 11 of the 12 adults are properly enrolled on the org they attended, including 6 on `SM: PS D Groups Leaders 2026-2027` itself (ages 40/45/45/54/55/59) — i.e. actual known leaders, correctly rostered, still tagged "Guest" on their attendance record. Heaviest-affected orgs this week: PS 12th Grade Biblical Worldview (18 rows), PS 10th Grade Apologetics (14), PS 7th New Testament (13), PS 8th Inductive Bible Study (12).
+
+**Conclusion: this is a Wednesday D-Group check-in data-quality issue at RPC, not a query/reporting problem.** Do not build report logic that treats D-Group `MemberTypeId = 310` as meaningful (visitor, drop-in, or otherwise) until RPC's admin team (Libbie Risberg, PeopleId 1675) has looked at whatever check-in method is used for D-Groups and confirmed why it isn't pulling the person's actual enrolled role. `sm-attendance-pyreport.py`'s D-Group Guest/`NotRostered` column (added 2026-08-27, see attendance-dashboard section) should be treated as provisional/likely-noise pending that cleanup.
+
+Also reconfirmed: `SM: PS D Groups Leaders 2026-2027` (OrgId 4060, TypeId 207) attendance is overwhelmingly `MemberTypeId = 220`, not 140/710 — same pattern already documented for `SM: All Volunteers` orgs above (don't infer role from `MemberTypeId`, use the org's `OrganizationTypeId`/name instead). And `SM: PS Health and Safety` (OrgId 1943, TypeId 207) sits in **both** Division 11 (SM Sundays) and Division 42 (SM Wednesdays) — another live multi-division `DivOrg` example (`EXISTS`, not `JOIN`).
+
 ---
 
 ## Key SM Involvements for Staff Filtering
