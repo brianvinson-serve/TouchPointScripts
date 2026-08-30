@@ -21,6 +21,14 @@ Structural metadata confirms object/column/key existence. Status/type meanings a
 | 1138   | Reporting (RP) PS Children ONLY Sun AM |
 | 1141   | RP PS Students |
 | 1119   | Adult Discipleship (AD) |
+| 1124   | Reporting (RP) All Programs ONLY Sun AM |
+| 1127   | Reporting (RP) All Programs OUTSIDE Sun AM |
+
+`1124`/`1127` discovered 2026-08-30 via `OrganizationStructure` (see below). **Confirmed 2026-08-30: this is a hand-maintained, division-level classification, not a live schedule-derived rollup.** Only 37 of RPC's 82 divisions are tagged into either bucket at all (not "every division"). Proof it isn't schedule-computed: 9 divisions (`AD Classes/Meetings/Groups`, `CM Childcare`, `CM Elementary`, `CM Preschool`, `CM Special Needs`, `MEN Classes`, `MM Classes`, `WM Classes`, `WM Discipleship`) are tagged into **both** buckets simultaneously with the *identical* org roster and identical `OrgSchedule` breakdown in each — if this were per-org schedule filtering, the same division couldn't land its whole unchanged roster in both an "ONLY Sun AM" and an "OUTSIDE Sun AM" bucket. It's also directly contradicted by content: `WM Classes` (DivId 13, tagged "ONLY Sun AM") has 468 of 471 member orgs with **no `OrgSchedule` row at all** and only 1 actually scheduled Sunday AM — the label doesn't reliably describe when its orgs meet. `SM Sundays` (DivId 11) is the one division that does line up with its label (50 of 72 orgs genuinely Sunday-AM-scheduled).
+
+**Do not use `1124`/`1127` as a "meets on Sunday morning" signal for attendance/schedule reporting** — treat it as a coarse ministry-scope tag (likely for facilities/capacity planning: who's on campus during the main service window vs. everything else), not a schedule fact. `OrgSchedule`/`Meetings` remain the only reliable source for actual meeting times, same as elsewhere in this doc. Not confirmed whether this is RPC-custom or a native TouchPoint feature — a quick look at TouchPoint's own Admin/Reports screens for something named "All Programs ONLY Sun AM" would settle that cheaply if it ever matters.
+
+Divisions tagged only `1124` (Sun AM bucket): `CO Baptism`, `CO First Time Visitor`, `RP CC Worship`, `RP PS Worship`, `SM Sundays`, `WO Services`. Divisions tagged only `1127` (outside-Sun-AM bucket): `AD Events`, `CM Mission Trips`, `CM Weekday Preschool`, `CO Dinner with the Pastor`, `CO Membership Matters`, `MEN Coffee Groups`, `MEN Events`, `MM Events`, `MM Premarital`, `MM re|engage`, `MS (DNU) Mission Trips`, `MS Global/Mission Trips`, `MS Local Missions`, `OP DIV`, `SG Events`, `SG Groups`, `SM Classes`, `SM Events`, `SM Mission Trips`, `SM Wednesdays`, `WM Sub-ministries`, `WM Events`. Both buckets: the 9 divisions listed above.
 
 ---
 
@@ -108,6 +116,21 @@ Links organizations to divisions.
 Columns: `DivId`, `OrgId`, `id`
 
 Confirmed 2026-08-13: composite primary key is (`DivId`, `OrgId`). Declared foreign keys are `DivId -> Division.Id` and `OrgId -> Organizations.OrganizationId`. The lowercase `id` column exists but is not part of the declared primary key.
+
+### OrganizationStructure (view) — confirmed 2026-08-30
+
+A built-in view, not RPC-custom. Discovered while evaluating `bswaby/Touchpoint`'s `TPxi_RollSheet.py`, which joins it as a convenience wrapper instead of `DivOrg`. Columns confirmed live: `Program`, `Division`, `OrgStatus`, `Organization` (display names) and `ProgId`, `DivId`, `OrgId` (keys), plus aggregate columns `Members`, `Previous`, `Vistors` (TouchPoint's own spelling, not a typo introduced here), `Meetings`.
+
+**Same one-to-many shape as `DivOrg` — actually broader.** Tested against two orgs already confirmed multi-division elsewhere in this doc:
+
+- `ReNew Fall 2026` (OrgId 3906, confirmed above in Division 126 + 31) returned **4 rows**: Division 31 under ProgId 1119 (its real program), Division 126 under ProgId 1119, and Division 31 again under both `1124` and `1127` (the "Reporting (RP) All Programs" ProgIds — see Programs table above).
+- `SM: PS Health and Safety` (OrgId 1943, confirmed above in Division 11 + 42) returned **4 rows**: Division 11 under ProgId 1109 (real), Division 42 under ProgId 1109 (real), Division 11 under `1124`, Division 42 under `1127`.
+
+So a plain `JOIN OrganizationStructure` fans out per (org, division, program) combination the org is linked into — worse than `DivOrg` alone, since it also picks up the church-wide `1124`/`1127` reporting buckets (confirmed hand-maintained division tags, not schedule-derived — see the Programs table above for the full breakdown). **The `EXISTS`-not-`JOIN` discipline documented for `DivOrg` applies here too.**
+
+**The aggregate columns are per-org constants repeated on every fan-out row, not per-row values.** Both test orgs showed identical `Members`/`Previous`/`Vistors`/`Meetings` across all 4 of their rows (`52/1/1/2` for ReNew, `7/2/1/93` for Health and Safety). A naive `SUM()`/`COUNT()` over this view without first deduplicating by `OrgId` will over-count by however many rows that org fans into. Safe pattern (what `TPxi_RollSheet.py` actually does): filter to one specific `ProgId`/`DivId` in the `WHERE` clause, then `SELECT DISTINCT OrgId` — that naturally collapses to one row per org because only one division/program combination matches the filter.
+
+**Possible shortcut, not yet trusted for reporting:** ReNew's `Meetings = 2` and `Members = 52` line up closely with this doc's independently-confirmed "two meetings held so far, ~50 members" — decent evidence `Members`/`Meetings` are legitimate live TouchPoint rollups. `Previous` and `Vistors` meanings are unconfirmed (guesses: prior-term/prior-meeting stat and visitor count, respectively). Do not build a report on these columns without confirming their exact definitions on a case where the expected number is independently known.
 
 ### Campus lookup
 
