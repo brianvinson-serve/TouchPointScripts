@@ -84,7 +84,7 @@ No separate Men/Women org exists for the current term (unlike some past terms, e
 
 Related current-term orgs, not folded into the roster report unless asked: `ReNew F26 Closed Groups` (4133, TypeId 201, Active) and `ReNew Fall 26 Leaders` (4039, TypeId 207 = volunteer/leader tracking, Active).
 
-Deployed report: `renew-roster-report/AD_ReNewRosterReport.py` — a generic Leader/Member roster + attendance-grid report, not ReNew-specific. It picks its target involvement from a configured division list (`DIVISION_FILTERS`, currently Division 126 + 31 above) via an in-page picker rather than a hardcoded OrgId, so it already covers every active AD ReNew/Classes-Groups org, and is designed to extend to other ministries (e.g. Marriage Ministry classes) by adding their Division.Id once confirmed. See that folder's README for the extension recipe.
+Deployed report: `attendance-roster-report/RPC_AttendanceRoster.py` — a Leader/Member roster + attendance-grid report covering **any RPC ministry**, not just AD/ReNew. Generalized 2026-08-30 from the original ReNew-only build: the picker is now a live three-stage Program -> Division -> Involvement flow sourced from `dbo.Program`/`dbo.Division`/`DivOrg` rather than a hardcoded division list, so a new ministry needs zero code changes to appear (only `EXCLUDED_PROGRAM_IDS` — RPC's internal reporting/admin Programs, see the `OrganizationStructure` section below — is still hand-maintained). See that folder's README for the full history.
 
 ---
 
@@ -613,7 +613,7 @@ WHERE o.OrganizationName LIKE 'SM: CC %' OR o.OrganizationName LIKE 'SM: PS %'
 ORDER BY o.OrganizationName
 ```
 
-`Meetings.Canceled` and `Meetings.DidNotMeet` are separate bit-flag columns used elsewhere in this repo (`data-dictionary-expander/sql/focused/RPC_Children*.sql`) to exclude non-meetings from attendance rollups — pattern is `ISNULL(m.Canceled, 0) = 0 AND ISNULL(m.DidNotMeet, 0) = 0`. Not yet in the confirmed-column list above; carried forward here since `renew-roster-report/AD_ReNewRosterReport.py` also depends on it and hasn't had a live TouchPoint run yet to verify.
+`Meetings.Canceled` and `Meetings.DidNotMeet` are separate bit-flag columns used elsewhere in this repo (`data-dictionary-expander/sql/focused/RPC_Children*.sql`) to exclude non-meetings from attendance rollups — pattern is `ISNULL(m.Canceled, 0) = 0 AND ISNULL(m.DidNotMeet, 0) = 0`. Not yet in the confirmed-column list above; carried forward here since `attendance-roster-report/RPC_AttendanceRoster.py` also depends on it and hasn't had a live TouchPoint run yet to verify.
 
 Note: `OrgSchedule.SchedDay = 0` = Sunday (confirmed in original attendance query).
 This differs from `DATEPART(dw, ...)` where Sunday = 1 under `SET DATEFIRST 7`.
@@ -773,7 +773,8 @@ Only ~21 open candidate pairs is low relative to the roundtable's "a ton of dupl
 | Python Scripts | SM_StaffTaskDashboard | Built, needs live TouchPoint test pass |
 | Python Scripts | RPC_StaffTaskDashboard | Live-tested by Brian 2026-08-26; Alan reviewing. Reachable only via Special Content "run script" link -- not yet added as a page for other staff. |
 | Python Scripts | RPC_MyTaskBoard | Built 2026-08-26, needs live TouchPoint test pass (STRING_AGG support unconfirmed). Personal Kanban-style "my tasks" view, read-only v1 -- see `outstanding-task-notifications/dashboard/README.md`. |
-| Python Scripts | AD_ReNewRosterReport | Built 2026-08-26, needs live TouchPoint test pass. Generalized past ReNew-only: picks any active involvement from a configured division list (currently the two AD divisions; extensible to other ministries), Leader/Member-only roster (sorted Leaders first) + weekly attendance grid -- see `renew-roster-report/README.md`. |
+| Python Scripts | RPC_AttendanceRoster (was AD_ReNewRosterReport, generalized 2026-08-30 -- church-wide, no longer AD-specific) | Built 2026-08-26, generalized + extended 2026-08-30, needs live TouchPoint test pass. Three-stage live Program -> Division -> Involvement(s) picker (any active RPC ministry, `EXCLUDED_PROGRAM_IDS` hides internal reporting/admin Programs, row-level security via `model.UserPeopleId` scopes non-admins to ministries/divisions they're actually in), multi-involvement selection with a combined attendance grid, configurable roster columns, Gender/Involvement/None grouping -- see `attendance-roster-report/README.md`. `ADMIN_BYPASS_PEOPLE_IDS` = [47110, 7059] (Brian Vinson, Marlene Godinez -- Brian's PeopleId confirmed 2026-08-30, not previously recorded elsewhere in this repo). |
+| Python Scripts | TPxi_RollSheet (community tool, TPxi Software/Ben Swaby, RPC fork) | Not yet deployed/live-tested. Self-update mechanism (fetches code from a third-party server and overwrites the deployed script) stripped for RPC before testing -- see `roll-sheet-report/README.md`. No `MemberTypeId` filter on its roster query, unlike `RPC_AttendanceRoster` -- known gap, not yet decided. |
 | Python Scripts | TP_DuplicatePersonFinder (was RPC_DuplicatePersonFinder, renamed 2026-08-27 -- generic-portable, no RPC-specific IDs) | Live-tested by Brian 2026-08-26/27 (2026 summit roundtable follow-up), judged a clear improvement after performance and household-false-positive fixes. Read-only nickname-aware + fuzzy duplicate-person audit report, scoped to recently-created People, excludes pairs already in native `dbo.Duplicate` -- see `duplicate-finder/README.md`. |
 
 ---
