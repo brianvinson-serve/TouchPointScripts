@@ -4,6 +4,31 @@ Active work and request status for the Student Ministry attendance dashboard.
 
 ## In Progress
 
+### CM attendance email: expand recipient list to 14 confirmed names, schedule MorningBatch
+
+**Status:** `RECIPIENT_PEOPLE_IDS` updated and `PREVIEW_MODE` flipped to `False` 2026-08-30 on Brian's go-ahead. Only remaining step is Brian pasting the MorningBatch block live (requires TouchPoint access this session doesn't have).
+**Requestor:** Brian, 2026-08-30
+
+**Request:** Brian supplied 14 names for the CM attendance email audience and asked to confirm email addresses are on file, then add the send to `MorningBatch`. Two names (Jen Schmitz, Angela Cheshire) match the two people `CM_AttendanceDashboardEmail.py`'s header note said the list was gated on pending sign-off from — treated as that sign-off per Brian's message.
+
+**Resolved via `CM_AttendanceEmailRecipientLookup.sql`:** 13 of 14 names matched `dbo.People` directly with `RESOLVED` status. "Jen Schmitz" alone came back `NOT_FOUND` (her TouchPoint `FirstName` is "Jennifer", not "Jen", and no matching `NickName`) — resolved by matching her supplied email to the same PeopleId (`6523`) already in the script from the original Angela/Jennifer-only list, so no new lookup was needed for her. Final IDs are in `CM_AttendanceDashboardEmail.py`'s `RECIPIENT_PEOPLE_IDS` with name comments.
+
+**Flag for Brian:** Sara Comer's TouchPoint record (`PeopleId` 25605) has a personal Gmail address on file, not an `@rpcstaff.org` address like the rest of the list. Name match confirms it's the right person; whether that's the address she wants used wasn't re-verified.
+
+**Done:**
+- `CM_AttendanceDashboardEmail.py`: `RECIPIENT_PEOPLE_IDS` replaced with all 14 confirmed PeopleIds; header note rewritten to reflect the 2026-08-30 confirmation instead of the old "controlled first-test" framing; `PREVIEW_MODE` flipped to `False` on Brian's explicit go-ahead (skipping the extra preview pass suggested earlier -- his call).
+- `DB_REFERENCE.md`'s MorningBatch section: moved the `CM_AttendanceDashboardEmail` block from pending to approved, alongside the SM one.
+- `python3 -m py_compile` passes.
+
+**Next steps (Brian, needs live TouchPoint access):**
+1. Save the updated `CM_AttendanceDashboardEmail.py` in TouchPoint (Admin > Advanced > Special Content > Python Scripts).
+2. Paste the approved block into TouchPoint's live `MorningBatch` script:
+   ```python
+   if model.DayOfWeek == 1:  # Monday
+       model.CallScript("CM_AttendanceDashboardEmail")
+   ```
+3. `FROM_EMAIL`'s stale `TODO confirm` comment removed -- the 2026-08-19 live test run (Angela's 2026-08-25 reply references it) already proved `childrensministry@rockpointechurch.org` delivers, so tomorrow's Monday send is a repeat of an address already confirmed live, not a first use.
+
 ### `SM_AttendanceDashboardEmail.py` reworked into a dual-mode, dual-day report + live check-in view
 
 **Status:** Code + local logic-harness validation done 2026-08-30; needs live TouchPoint validation before scheduling Thursday

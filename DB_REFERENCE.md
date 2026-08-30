@@ -766,6 +766,14 @@ if model.DayOfWeek == 1:
     model.CallScript("SM_AttendanceDashboardEmail")
 ```
 
+Approved addition for the weekly CM attendance report -- recipient list
+confirmed and PREVIEW_MODE flipped to False 2026-08-30 (14 names, see
+attendance-dashboard/BACKLOG.md and CM_AttendanceDashboardEmail.py's header):
+```python
+if model.DayOfWeek == 1:
+    model.CallScript("CM_AttendanceDashboardEmail")
+```
+
 Still pending for outstanding-task notifications:
 ```python
 if model.DayOfWeek == 2:

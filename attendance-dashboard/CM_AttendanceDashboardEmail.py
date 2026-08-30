@@ -66,15 +66,20 @@
 #   rather than by name-keyword match; see @PS830VolunteersSchedulerOrgId
 #   below and classify_volunteer_bucket() below.
 #
-# RECIPIENTS -- STATUS AS OF 2026-08-17:
-# Marlene's request came in copying Angela Cheshire (Children's Ministry
-# Administrator, PeopleId 2879) and Jennifer Schmitz (NextGen Administrator,
-# PeopleId 6523). Marlene asked THEM to confirm the full involvement list
-# before this goes into regular production rotation. Until that confirmation
-# comes back, RECIPIENT_PEOPLE_IDS below intentionally contains only Angela,
-# Jennifer, and Brian's own PeopleId for a controlled first live test --
-# do NOT expand this list or schedule MorningBatch calls until Angela and
-# Jennifer have signed off on the involvement scope above.
+# RECIPIENTS -- STATUS AS OF 2026-08-30:
+# Angela Cheshire and Jennifer Schmitz (the two people Marlene originally
+# asked to confirm involvement scope) are both included in Brian's 2026-08-30
+# 14-name recipient list, taken as their sign-off. PeopleIds resolved via
+# attendance-dashboard/CM_AttendanceEmailRecipientLookup.sql (13 of 14 direct
+# name matches; Jen Schmitz matched by email to the existing Jennifer Schmitz
+# PeopleId 6523 already used here, since her TouchPoint FirstName is
+# "Jennifer" not "Jen"). Sara Comer's TouchPoint record has a personal Gmail
+# address on file, not an rpcstaff.org address like the rest of the list --
+# confirmed correct-person via name match, not re-verified as intentional.
+#
+# PREVIEW_MODE flipped to False 2026-08-30 on Brian's go-ahead -- this script
+# now sends for real when run. Add the MorningBatch call below to schedule it
+# (see DB_REFERENCE.md's MorningBatch section for the exact block).
 #
 # DEPLOYMENT: Admin > Advanced > Special Content > Python Scripts
 # File name should be: CM_AttendanceDashboardEmail
@@ -84,8 +89,7 @@
 # Set PREVIEW_MODE = False (and save) before a real send or before scheduling
 # to MorningBatch.
 #
-# SCHEDULING (only after a controlled live send succeeds AND Angela/Jennifer
-# have confirmed scope):
+# SCHEDULING:
 #   if model.DayOfWeek == 1:  # Monday
 #       model.CallScript("CM_AttendanceDashboardEmail")
 
@@ -101,18 +105,29 @@ global model, q
 
 # Flip to True, save, and run to preview the report without sending any
 # email. Flip back to False (and save) before a real send.
-PREVIEW_MODE = True
+PREVIEW_MODE = False
 
-FROM_EMAIL = "childrensministry@rockpointechurch.org"  # TODO confirm exact CM send-as address before first live send
+FROM_EMAIL = "childrensministry@rockpointechurch.org"  # confirmed live via the 2026-08-19 test send (see BACKLOG.md)
 FROM_NAME = "RockPointe Children's Ministry"
 QUEUED_BY = 23164  # confirmed live sender PeopleId (reused from SM scripts)
 
-# TODO: replace with the confirmed full list once Angela and Jennifer sign
-# off on involvement scope (see header note above). Until then this is a
-# controlled first-test list only.
+# Confirmed 2026-08-30 -- see header note above and
+# attendance-dashboard/CM_AttendanceEmailRecipientLookup.sql.
 RECIPIENT_PEOPLE_IDS = [
-    2879,  # Angela Cheshire -- Children's Ministry Administrator
-    6523,  # Jennifer Schmitz -- NextGen Administrator
+    6674,   # Amy Kraus
+    29093,  # Aimee Whaley
+    21230,  # Ashley Reynolds
+    25605,  # Sara Comer -- personal Gmail on file, not rpcstaff.org
+    4702,   # Christy McCallum
+    6523,   # Jen(nifer) Schmitz -- NextGen Administrator
+    2879,   # Angela Cheshire -- Children's Ministry Administrator
+    28926,  # Leah McBain
+    3262,   # Christi Victor
+    23538,  # Courtney Rehbehn
+    106,    # Margo Baisley
+    29228,  # Treeka Andries
+    1918,   # Darlene Everest
+    5285,   # Kellie Lampe
 ]
 
 PROGRAM_ID = 1111
