@@ -4,6 +4,55 @@ Active work and request status for the Student Ministry attendance dashboard.
 
 ## In Progress
 
+### `SM_AttendanceDashboardEmail.py` reworked into a dual-mode, dual-day report + live check-in view
+
+**Status:** Code + local logic-harness validation done 2026-08-30; needs live TouchPoint validation before scheduling Thursday
+**Requestor:** Brian
+
+**Request:** (1) confirm the Monday recap email already scopes to Sunday-only student/volunteer attendance, (2) reuse the same script for a Thursday recap of Wednesday-night D-Group attendance, and — raised mid-session — (3) also let Brian pull up the same report live on his phone during Sunday/Wednesday check-in, before the recap email would fire.
+
+**Findings before implementation:**
+- The one open bug near this script (`sm-attendance-flat.sql`/`sm-attendance-pyreport.py`'s same-day "phantom meeting" issue, below) does **not** affect this script — confirmed unaffected in the original 2026-08-13 implementation notes, since it already targets the most-recently-completed Sunday explicitly.
+- Found a real, previously-uncaught bug while checking Brian's memory of "a bug we found for the email report": the prior script's `LEADER_ATTENDANCE_ORG_NAMES` had `"SM: PS D Group Leaders 2026-2027"` (singular "Group"), but `DB_REFERENCE.md`'s live-confirmed name (OrgId 4060) is `"SM: PS D Groups Leaders 2026-2027"` (plural). Exact-name-match SQL meant that leader line had silently shown 0 every week. Moot for Sunday now (see below), fixed with the correct plural name for the new Wednesday report.
+- Confirmed via `git log -p` that `sm-attendance-pyreport.py` (commit `a62c89b`, 2026-08-27) already hit and fixed the exact bug this rework would otherwise reintroduce: D-Group orgs don't all follow the `SM: CC */SM: PS *` naming convention (e.g. `SM: Identity: Daughters of the King`, `SM: Man Up`), and a name-prefix filter had silently dropped two of them. The new Wednesday-mode query includes any active org in Division 42 regardless of name, same as the dashboard's fix.
+
+**Decisions confirmed with Brian:**
+- Remove `SM: PS D Groups Leaders 2026-2027` from the Sunday report's leader section entirely — it's a Wednesday-division org and gets its own line in the new Wednesday report instead.
+- Same 12 recipient PeopleIds for both the Sunday and Wednesday/D-Group recap emails.
+- D-Group detail rows grouped by grade only (Middle School / High School / Other), no gender split — D-Group org names are topic-based (e.g. "10th Grade Apologetics"), not Guys/Girls like Sunday.
+- Sending is gated purely by day-of-week, hardcoded in the script (Monday/Thursday only) — not a URL flag — so the phone-check-in link is safe to open on Sunday/Wednesday with zero risk of triggering a send. `model.CallScript` cannot pass parameters to a called script (confirmed dead end, see the CM email rebuild's `model.CallScript` finding below), so this gate has to live inside the script itself rather than being passed in from the `MorningBatch` caller.
+- The live Sunday/Wednesday view uses the same layout as the email, including the week-over-week delta, just dated today instead of last week.
+
+**Implementation:** `SM_AttendanceDashboardEmail.py` now resolves its own `mode` (Sunday vs. Wednesday/D-Groups) and `action` (View vs. Send) from Python's own `datetime.now().date().weekday()` — not `model.DayOfWeek`, whose exact Sunday/Thursday numeric values are unconfirmed in this repo (only "1 = Monday" has been confirmed live). Sunday/Wednesday always render a live view of today's in-progress attendance and can never reach `model.Email(...)`; Monday/Thursday send the prior day's recap. Optional `Mode=`, `View=1`, and `Date=` URL params exist for manual testing only and cannot force a send outside Monday/Thursday. Grade/gender parsing moved from T-SQL `CROSS APPLY` into a shared Python parser so it can handle both Sunday's `Guys`/`Girls` suffix convention and D-Group's mixed graded/topic-only names. See `README.md` for the full mode table and the not-yet-live-validated checklist.
+
+**Validation done without live TouchPoint access:** `python3 -m py_compile`, plus a logic harness (mocked `model`/`q`, `datetime` patched via `unittest.mock`) exercising 7 scenarios: Sunday view, Monday send, Wednesday view, Thursday send, Monday `View=1` preview, an off-day manual run, and a `Mode=`/`Date=` override — mode/action/date routing, the send gate, missing-meeting detection, and D-Group label rendering (including ungraded topic orgs like "Identity: Daughters of the King" and the "Middle School Off Hour" case) all resolved correctly against synthetic rows. This does **not** validate the actual SQL against RPC's live schema. Before scheduling the Thursday `MorningBatch` call, Brian should: confirm `Mode=Sunday` still renders identically to the known-good prior output; confirm `Mode=Wednesday` actually surfaces the non-CC/PS-prefixed D-Group orgs and excludes `SM: SLT 26-27`; confirm the plural `SM: PS D Groups Leaders 2026-2027` name matches OrgId 4060 live; and follow the same preview-then-controlled-recipient-then-full-audience rollout used for the original Sunday email before trusting a live Thursday send.
+
+### SM dashboard: same-day "phantom" meeting silently dilutes every average
+
+**Status:** Found 2026-08-30, fix pending — Brian plans to resolve later today
+**Requestor:** Brian (found during a routine dashboard review)
+
+**Finding:** A CSV export pulled at 1:30am on Sunday 2026-08-30 (`sm-attendance-2026-08-30.csv`), before any check-in had happened, contained one stray row: `SM: CC 6th Guys`, `2026-08-30`, Attendance `0`, Guests `0`. No other SM Sunday group had a row for that date, which is correct — but that one row was enough to add 2026-08-30 into `sm-dashboard.html`'s shared date axis (`allDates()`), and every group's average divides by that shared date count. Verified impact against the file: the "Sunday avg" stat read 210 instead of the true 245 (6 completed Sundays), and every detail/campus average was understated ~14% (dividing by n=7 instead of n=6). Not cosmetic — reads as a real attendance drop that didn't happen.
+
+**Root cause:** `sm-attendance-flat.sql` (and the identical pattern in `sm-attendance-pyreport.py`) joins `Meetings` with only a date-truncated range filter (`CAST(m.MeetingDate AS DATE) BETWEEN @StartDate AND @EndDate`) and `ISNULL(m.NumPresent, 0)`, with no guard excluding a meeting that hasn't happened yet or is flagged `DidNotMeet`/`Canceled`. TouchPoint creates the `Meetings` row from `OrgSchedule` ahead of the actual service time, so a same-day row can exist with `NumPresent` defaulting to 0 hours before check-in starts. `DB_REFERENCE.md` already documents excluding `Canceled`/`DidNotMeet` meetings for D-Group weekly snapshots — that exclusion was never carried into this flat query or the interactive dashboard.
+
+**Not affected:** `SM_AttendanceDashboardEmail.py` — it already targets the most recently completed Sunday explicitly, never today.
+
+**Proposed fix:** in `sm-attendance-flat.sql` and `sm-attendance-pyreport.py`, exclude meetings that haven't occurred yet and any `DidNotMeet`/`Canceled` meetings (e.g. `m.MeetingDate <= GETDATE() AND` a not-yet-confirmed `DidNotMeet`/cancel-flag check — confirm the exact column against `DB_REFERENCE.md`/live schema before wiring in).
+
+### `sm-flash-attendance-report.py`: broken, wrong-ministry draft sitting untracked
+
+**Status:** Found 2026-08-30, untracked in the repo — needs triage before it's committed or run
+**Requestor:** Brian (found during a routine dashboard review)
+
+An untracked file, `attendance-dashboard/sm-flash-attendance-report.py`, is sitting in the repo (not committed, present at session start — possibly Kenny/Hermes WIP, unconfirmed). It appears broken and mis-scoped:
+
+- Invalid T-SQL: `JOIN OrganizationMember om ON ... om.OrganizationId = o.Id` references alias `o` before the `JOIN Organization o` line that defines it — will throw a binding error if run.
+- Table/column names don't match RPC's confirmed schema per `DB_REFERENCE.md` (`Attendance`/`Organization`/`Campus` instead of the confirmed `Attend`/`Organizations`/`lookup.Campus`).
+- Despite the `sm-` filename, the email subject and body both say "Children's Ministry Attendance Report," and the recipient list includes Angela Cheshire (the CM contact from the CM email rebuild item above), not SM's confirmed 12 recipients from `DB_REFERENCE.md`.
+
+Needs confirmation of origin/intent before any fix — do not deploy as-is.
+
 ### CM email rebuild: mirrored dashboard fixes + 6-week average
 
 **Status:** Waiting on client — live TouchPoint test run came back clean 2026-08-19, sent on to the RPC team for feedback
