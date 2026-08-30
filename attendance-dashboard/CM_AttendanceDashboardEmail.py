@@ -154,7 +154,7 @@ EXCLUDED_ORG_IDS = (4026, 4027, 4020, 4021)
 AVERAGE_WINDOW_WEEKS = 6
 
 # Parameterized full dashboard deployed in TouchPoint.
-DASHBOARD_SCRIPT_NAME = "cm-attendance-pyreport"
+DASHBOARD_SCRIPT_NAME = "CM_AttendanceDashboard"
 
 # ============================================================
 # DATE PARAMETERS

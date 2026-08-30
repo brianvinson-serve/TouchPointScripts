@@ -86,7 +86,7 @@ RECIPIENT_PEOPLE_IDS = [
 ]
 
 # Parameterized full dashboard deployed in TouchPoint.
-DASHBOARD_SCRIPT_NAME = "sm-attendance-pyreport"
+DASHBOARD_SCRIPT_NAME = "SMAttendanceDashboard"
 
 PROGRAM_ID = 1109
 ACTIVE_STATUS_ID = 30

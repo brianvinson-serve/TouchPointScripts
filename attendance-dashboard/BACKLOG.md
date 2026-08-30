@@ -15,6 +15,8 @@ Active work and request status for the Student Ministry attendance dashboard.
 
 **Flag for Brian:** Sara Comer's TouchPoint record (`PeopleId` 25605) has a personal Gmail address on file, not an `@rpcstaff.org` address like the rest of the list. Name match confirms it's the right person; whether that's the address she wants used wasn't re-verified.
 
+**2026-08-30 addendum:** the "View interactive attendance report" button's `DASHBOARD_SCRIPT_NAME` was still pointed at the old repo-filename-style script names (`cm-attendance-pyreport`). Brian confirmed the live TouchPoint deployment is now `CM_AttendanceDashboard` (URL: `https://rockpointe.tpsdb.com/PyScript/CM_AttendanceDashboard`) — updated in `CM_AttendanceDashboardEmail.py`. Same fix applied to `SM_AttendanceDashboardEmail.py`'s `DASHBOARD_SCRIPT_NAME`, now `SMAttendanceDashboard` (`https://rockpointe.tpsdb.com/PyScript/SMAttendanceDashboard`). Both keep the existing `?StartDate=&EndDate=&CampusFilter=ALL` deep-link params -- only the script-name portion changed.
+
 **Done:**
 - `CM_AttendanceDashboardEmail.py`: `RECIPIENT_PEOPLE_IDS` replaced with all 14 confirmed PeopleIds; header note rewritten to reflect the 2026-08-30 confirmation instead of the old "controlled first-test" framing; `PREVIEW_MODE` flipped to `False` on Brian's explicit go-ahead (skipping the extra preview pass suggested earlier -- his call).
 - `DB_REFERENCE.md`'s MorningBatch section: moved the `CM_AttendanceDashboardEmail` block from pending to approved, alongside the SM one.
