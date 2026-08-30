@@ -38,13 +38,22 @@ The two rightmost columns (after Total) are chosen from a dropdown at stage 3, i
 | Email | `EmailAddress`, falling back to `EmailAddress2` |
 | Age | `People.Age` |
 | Gender | `lookup.Gender.Description`/`Code`, falling back to "Unknown" |
-| Address (City, State) | `People.City`, `People.State` |
 | Grade | `lookup.GradeLevel.Code`/`Description`, falling back to the legacy `People.Grade` value |
 | Marital Status | `lookup.MaritalStatus.Description`/`Code` |
 | Last Name | `People.LastName` (an approximation for "who's in the same family" — there's no confirmed household/family-name field, see below) |
 | Involvement (class/org name) | Which selected org/class this row belongs to — mainly useful when multiple involvements are combined |
 
-All of these except Phone/Email/Involvement (already part of the original build) are **not yet RPC-confirmed** — they assume standard TouchPoint/BVCMS field names that haven't been specifically verified live the way Program/Division/DivOrg/MemberType have been elsewhere in this repo. If any throws `Invalid column name`, fix it here and fold the correction back into `DB_REFERENCE.md`.
+Grade/Marital Status (Phone/Email/Involvement were already part of the original build) are **not yet RPC-confirmed** — they assume standard TouchPoint/BVCMS field names that haven't been specifically verified live the way Program/Division/DivOrg/MemberType have been elsewhere in this repo. If any throws `Invalid column name`, fix it here and fold the correction back into `DB_REFERENCE.md`.
+
+**Address was tried and removed 2026-08-30** — a live run threw `Invalid column name 'City'`/`'State'`: `People.City`/`People.State` don't exist on RPC's schema. Likely on `Families` instead (per `DB_REFERENCE.md`, `People.FamilyId -> Families.FamilyId`), not yet confirmed. Before re-adding it, run this in `Admin > Advanced > Special Content > SQL Scripts` to find the real column names:
+
+```sql
+SELECT TABLE_NAME, COLUMN_NAME
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_NAME IN ('People', 'Families')
+  AND (COLUMN_NAME LIKE '%Address%' OR COLUMN_NAME LIKE '%City%' OR COLUMN_NAME LIKE '%State%' OR COLUMN_NAME LIKE '%Zip%')
+ORDER BY TABLE_NAME, COLUMN_NAME
+```
 
 ## Grouping / page breaks
 
@@ -95,9 +104,11 @@ Round 3 (2026-08-30): generalized to the three-stage live Program/Division/Invol
 
 Round 4 (same day): configurable columns (incl. "Leave Blank"), a unified Gender/Involvement/None grouping dropdown, multi-involvement selection via checkboxes, and row-level security via `model.UserPeopleId`.
 
-Syntax-checked (`python3 -m py_compile`) and smoke-tested locally with mocked `q`/`model` objects across three rounds of tests, covering: the program/division/org pickers with exclusion filtering, invalid-id fallback at every stage, admin-bypass vs. scoped row-level security (including a zero-membership user seeing nothing), the checkbox picker, multi-involvement combined rosters grouped by involvement, custom column selection including "blank" and "Involvement", and grouping-mode fallback on an invalid value. **Not yet run live against RPC TouchPoint** — needs a live pass to confirm:
+**First live run (2026-08-30) found a real bug**: the Address column threw `Invalid column name 'City'`/`'State'` — `People.City`/`People.State` don't exist on RPC's schema. Removed (see "Configurable columns" above for the discovery query to run before re-adding it). Everything else in that same run was not reported as broken.
+
+Syntax-checked (`python3 -m py_compile`) and smoke-tested locally with mocked `q`/`model` objects across four rounds of tests, covering: the program/division/org pickers with exclusion filtering, invalid-id fallback at every stage, admin-bypass vs. scoped row-level security (including a zero-membership user seeing nothing), the checkbox picker, multi-involvement combined rosters grouped by involvement, custom column selection including "blank" and "Involvement", grouping-mode fallback on an invalid value, and (after the Address removal) that no query references `p.City`/`p.State` anymore. Still needs a full live pass to confirm:
 
 - The three-stage picker and row-level-security `EXISTS` filters actually walk correctly through TouchPoint's live `Program`/`Division`/`DivOrg`/`OrganizationMembers` data end to end.
 - `EXCLUDED_PROGRAM_IDS` fully hides RPC's admin/reporting Programs from the ministry picker (only spot-checked against `DB_REFERENCE.md`'s confirmed list, not re-queried live here).
-- The Address/Grade/Marital Status column SQL (see "Configurable columns" above) against RPC's actual schema.
+- The Grade/Marital Status column SQL (see "Configurable columns" above) against RPC's actual schema — not flagged as broken by the first live run, but not independently re-verified either.
 - Everything already flagged as unconfirmed in the original AD-only build: `Meetings.Canceled`/`Meetings.DidNotMeet` behavior generalized across whichever org(s) get picked, and whether `OrganizationMembers` for other ministries' orgs contains anyone who should be excluded beyond the Leader/Member filter.

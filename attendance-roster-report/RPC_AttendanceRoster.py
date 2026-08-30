@@ -67,12 +67,17 @@ blank if absent; canceled/did-not-meet meetings excluded from the grid
 entirely), a Total column summing meetings attended, then the two
 configurable columns.
 
-NOT YET RPC-CONFIRMED: the Address/Grade/Marital Status columns assume
-standard TouchPoint/BVCMS field names (People.AddressLineOne/City/State,
-People.GradeLevelId -> lookup.GradeLevel, People.MaritalStatusId ->
-lookup.MaritalStatus) that haven't been specifically verified live against
-RPC's instance the way Program/Division/DivOrg/MemberType have been
-elsewhere in this repo. Grade reuses the exact fallback pattern DB_REFERENCE.md
+NOT YET RPC-CONFIRMED: the Grade/Marital Status columns assume standard
+TouchPoint/BVCMS field names (People.GradeLevelId -> lookup.GradeLevel,
+People.MaritalStatusId -> lookup.MaritalStatus) that haven't been
+specifically verified live against RPC's instance the way
+Program/Division/DivOrg/MemberType have been elsewhere in this repo. An
+Address column was tried the same way and removed 2026-08-30 after a live
+run threw "Invalid column name 'City'"/"'State'" -- People.City/State
+don't exist on RPC's schema; likely on Families instead (per
+DB_REFERENCE.md, People.FamilyId -> Families.FamilyId), not yet confirmed.
+See attendance-roster-report/README.md for the discovery query to run
+before re-adding it. Grade reuses the exact fallback pattern DB_REFERENCE.md
 confirms for student-contact-export/SM_StudentContactExport.py. If any of
 these throw an "Invalid column name" error live, that column's SQL/comment
 here needs the fix folded back into DB_REFERENCE.md.
@@ -135,7 +140,6 @@ FIELD_OPTIONS = [
     ("email", "Email"),
     ("age", "Age"),
     ("gender", "Gender"),
-    ("address", "Address (City, State)"),
     ("grade", "Grade"),
     ("maritalstatus", "Marital Status"),
     ("lastname", "Last Name"),
@@ -220,8 +224,6 @@ def field_value(key, p):
         return str(age) if age not in (None, "") else ""
     if key == "gender":
         return p.Gender or ""
-    if key == "address":
-        return p.Address or ""
     if key == "grade":
         return p.Grade or ""
     if key == "maritalstatus":
@@ -552,7 +554,7 @@ else:
             # Only Leader/Member MemberTypeIds; sorted by Involvement (so a
             # multi-org combined roster naturally groups by org even before
             # any Python-side grouping), then Leader-before-Member, then
-            # name. Age/Address/Grade/Marital Status are always fetched
+            # name. Age/Grade/Marital Status are always fetched
             # (cheap one-to-one lookups keyed on People's own foreign keys,
             # no fan-out risk) regardless of which two are actually chosen
             # for display -- simpler than building the SELECT/JOINs
@@ -568,11 +570,6 @@ else:
                 CellPhone = p.CellPhone,
                 Email = COALESCE(NULLIF(LTRIM(RTRIM(p.EmailAddress)), ''), NULLIF(LTRIM(RTRIM(p.EmailAddress2)), ''), ''),
                 Age = p.Age,
-                Address = LTRIM(RTRIM(
-                    COALESCE(NULLIF(p.City, ''), '') +
-                    CASE WHEN NULLIF(p.City, '') IS NOT NULL AND NULLIF(p.State, '') IS NOT NULL THEN ', ' ELSE '' END +
-                    COALESCE(NULLIF(p.State, ''), '')
-                )),
                 Grade = COALESCE(NULLIF(gl.Code, ''), NULLIF(gl.Description, ''), NULLIF(CAST(p.Grade AS VARCHAR(20)), ''), ''),
                 MaritalStatus = COALESCE(NULLIF(ms.Description, ''), NULLIF(ms.Code, ''), ''),
                 Involvement = o2.OrganizationName
