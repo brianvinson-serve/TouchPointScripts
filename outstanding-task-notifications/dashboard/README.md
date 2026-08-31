@@ -136,9 +136,13 @@ Cards are color-coded by task age using the same bucket labels/thresholds as `RP
 
 **v1 is read-only.** No drag-and-drop, no status write-back -- cards link to the native TouchPoint profile/task list for any action. A v2 that writes `StatusId` back on a column move is a deliberate follow-up requiring Brian's explicit sign-off and a rollback plan (per this repo's read-only-by-default rule).
 
-## Known gap before wider rollout
+## Bug fixed (2026-08-31): KeyError on first live run
 
-The script accepts an optional `?pid=` query param (mirrors `SM_OutstandingTasksList.py`'s `Data.pid`) so Brian/admin can view another person's board for testing. **It is not role-gated** -- anyone who can reach the script URL and knows another PeopleId can currently view that person's board. That's an acceptable gap while this is only reachable via the admin "run script" link; it needs to be removed or replaced with a real role check before this is added as a general staff-facing nav page.
+Brian's first live test threw `KeyError: The given key was not present in the dictionary.` The `<style>` block's CSS is built inside a Python string that's piped through `.format(viewer=...)` -- `.format()` treats every single `{`/`}` as a placeholder, and raw CSS rules like `.rpc-my-board { ... }` have dozens of them. Fixed by escaping the CSS body's braces to `{{ }}` so only the intended `{viewer}` placeholder resolves. Verified locally by executing the fixed block with a mock `model`/`q`, and by rendering the full script end-to-end -- both come back clean. Checked the two sibling scripts (`RPC_StaffTaskDashboard.py`, `SM_StaffTaskDashboard.py`) for the same pattern: both keep their CSS `print()` separate from any `.format()` call, so they don't have this bug.
+
+## Security gap closed (2026-08-31)
+
+v1 originally had an optional `?pid=` query param (mirroring `SM_OutstandingTasksList.py`'s `Data.pid`) so Brian/admin could view another person's board for testing. It was **not role-gated** -- anyone who could reach the script URL and knew another PeopleId could view that person's board. Removed entirely ahead of the widget rollout below, since a homepage widget is visible to a much wider staff audience than the admin "run script" link. Admins who need to check another person's tasks should use `RPC_StaffTaskDashboard.py`'s Task Detail view (filterable by staff member) instead -- no functionality was actually lost.
 
 ## TouchPoint Deployment
 
@@ -156,11 +160,56 @@ The script accepts an optional `?pid=` query param (mirrors `SM_OutstandingTasks
 3. Confirm columns render as To Do / In Progress / Done, with Declined appearing only if that person has a recent declined task.
 4. Confirm card color/border matches age (spot-check one old task and one new task).
 5. Confirm the `STRING_AGG` keyword subquery doesn't error -- **needs live validation**, same caveat as `RPC_StaffTaskDashboard.py`.
-6. Test the `?pid=` admin override with a different PeopleId and confirm the "viewing via override" banner appears.
-7. Confirm card links open the right person's TouchPoint profile.
+6. Confirm card links open the right person's TouchPoint profile.
 
 ## Expected caveats
 
 - Local validation only checked Python syntax (`py_compile`). The query, `STRING_AGG` usage, and rendered board still need live TouchPoint execution.
-- Not yet added as a page for staff -- reachable only via Special Content "run script" today. Close the `?pid=` gap above first.
+- Not yet added as a page for staff -- reachable only via Special Content "run script" today (the compact `RPC_MyTasksWidget.py` below is the homepage-facing entry point; this full board is reached from its "View full board" link).
 - Keyword chips show raw codes (e.g. `SG`, `CP`), not the fuller description/group labels `RPC_StaffTaskDashboard.py` uses -- kept intentionally lightweight since this view isn't filtering by task type.
+
+---
+
+# RPC My Tasks Widget
+
+Compact TouchPoint Homepage Widget sibling of `RPC_MyTaskBoard.py`. The full board is a wide, multi-column Kanban layout -- too big for a homepage widget slot -- so this widget shows a short worst-first list of open tasks plus headline counts, with a link out to the full board.
+
+## What it does
+
+- Header shows a red "N overdue" badge when applicable.
+- Up to 5 worst-first open tasks (`StatusId` 2/3 only -- no Done/Declined lookback, since this is a "what's outstanding now" view, not a recent-activity view).
+- Each row: about-person name (linked to their TouchPoint profile), a truncated instructions snippet, and an age-bucket label using the same color/bucket language as `RPC_MyTaskBoard.py` and `RPC_StaffTaskDashboard.py`.
+- "+N more open tasks" line when there are more than 5.
+- Footer link to the full Kanban board (`RPC_MyTaskBoard`) via `/PyScript/RPC_MyTaskBoard`.
+
+**Row-level security:** `model.UserPeopleId` only -- this widget was written without the `?pid=` admin-override pattern in the first place, since a homepage widget has a much wider audience than an admin-only "run script" link.
+
+**Why not TouchPoint's stock My Tasks widget:** TouchPoint ships a built-in My Tasks widget, but per TouchPoint's docs it queries the legacy `Task` table, not `TaskNote`. `DB_REFERENCE.md` confirms RPC's `Task` table has an approximate row count of 0 -- all live RPC task data is in `TaskNote`. The stock widget would render empty here.
+
+**Styling:** reuses TouchPoint's own `box` / `box-title` / `list-group` CSS classes (confirmed from the stock Vital Stats widget's markup) so it visually matches other homepage widgets instead of introducing a new look.
+
+**v1 is read-only**, same rule as the full board -- rows link out to the person's TouchPoint profile for any action.
+
+## TouchPoint Deployment
+
+1. `Admin > Advanced > Special Content > Python Scripts > +New`, name `RPC_MyTasksWidget`, paste in the script contents, and set **Content Keywords** to `Widget` (required for it to be selectable as a widget's Code file).
+2. `Admin > Advanced > Homepage Widgets > + Add Widget`:
+   - **Code (Python):** `RPC_MyTasksWidget`
+   - **View (HTML):** none needed -- this script prints its own HTML directly (confirmed possible from a community widget's install instructions: a widget can be registered with only a Python file selected).
+   - **Roles:** blank for all logged-in staff, or restrict as desired.
+   - **Caching:** recommend "Once a day" / "per user" -- task lists don't need real-time refresh and this is a per-user query.
+3. Enable the widget.
+
+## Test steps
+
+1. Create the Python script and register the widget per the steps above.
+2. Load the TouchPoint homepage as a staff member with open tasks -- confirm the widget shows only that person's tasks, worst-first, capped at 5.
+3. Confirm the overdue badge appears only when the person has an overdue task, and the count matches.
+4. Confirm each row's name link opens the right TouchPoint profile.
+5. Confirm "View full board" links to the working `RPC_MyTaskBoard` page.
+6. Load as a staff member with zero open tasks -- confirm the "Nothing outstanding right now" empty state.
+
+## Expected caveats
+
+- Local validation only checked Python syntax (`py_compile`). The query and rendered widget still need live TouchPoint execution, including whether the Homepage Widgets admin form actually allows leaving View (HTML) blank -- if it doesn't, a trivial placeholder Text file tagged `Widget` will need to be created and selected instead.
+- Widget caching means the list can lag behind real-time task changes by up to the configured cache interval -- acceptable tradeoff for a homepage glance view, not appropriate if Brian wants live-refresh behavior.
