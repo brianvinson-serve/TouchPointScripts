@@ -669,6 +669,26 @@ ORDER BY o.OrganizationName
 
 ---
 
+## Mobile App Channels — confirmed 2026-08-31
+
+Marlene Godinez and Arianah Torres (Men's Ministry Assistant & Social Media Associate) requested a report of all mobile-app Channels (public and closed) with an Active/Inactive column and an include/exclude-inactive toggle — the native `Admin > Communications > Channels` Excel export shows every involvement with a channel enabled, including inactive ones, but doesn't label which is which. No existing tool in this repo, `bswaby/Touchpoint`, or `TenthPres/TouchPointScripts` covers Channels.
+
+`data-dictionary-expander/sql/focused/RPC_ChannelReportDiscovery.sql` was run live 2026-08-31 (`RunScript.xlsx`, 252 channel-enabled involvements, `Organizations.MobileChannelEnabled = 1`). Not yet cross-checked cell-by-cell against the native Channels Excel export, but the result shape strongly supports most of the candidate schema below by pattern (see reasoning per row):
+
+| Ari's requested field | Source | Confidence |
+|---|---|---|
+| Active/Inactive | `Organizations.OrganizationStatusId` (30=Active, 40=Inactive) | High — reuses an already-confirmed lookup. 144 Active / 108 Inactive of the 252 — confirms Ari's stated problem is real: 43% of channel-enabled involvements are inactive. |
+| Public/Closed | `Organizations.MobileChannelPrivate` (0/NULL = public, 1 = closed) | High by pattern — only 15/252 are Private=0, and every one of those 15 is a broad standing ministry-wide channel (`RockPointe Church` 889 followers, `MM: Marriage Ministry`, `MGSA: Mid-Gen/Senior Adult Ministry`, `Parenting Ministry`, `Renew`, `Embrace Special Needs`), while the 237 Private=1 rows are specific small groups/volunteer teams/one-off events — exactly the public-vs-closed split the docs describe. Not yet UI-confirmed on a single row. |
+| "has a Channel" filter | `Organizations.MobileChannelEnabled` | High — is the query's base filter; 252 rows returned, none unexpected. |
+| Photo | `Organizations.ImageUrl` | **Confirmed live 2026-08-31.** RockPointe Church (ID 3506) has `ImageUrl` set but `BadgeUrl` NULL, and the live app shows a clear photo (the cross logo) on that channel — `ImageUrl` is the field the app actually displays, not `BadgeUrl`. `BadgeUrl`'s real purpose is unconfirmed (not the channel photo); do not use it for the Photo column. |
+| Leaders (count) | `OrganizationMembers` rows with `MemberTypeId = 140` (Leader), `InactiveDate IS NULL` | Medium-high by pattern — SM grade-level volunteer channels (e.g. `SM: High School Guys Volunteers`, ID 3485) show 17-21 leaders, plausible for real volunteer teams; 101/252 rows show 0, concentrated in Bible Study/Class and Community/Missions types where a formal `MemberTypeId=140` assignment is plausibly just not done. Not independently UI-confirmed (no leader count visible in the app screenshot), but the pattern is strong enough to build on. |
+| Followers (count) | `OrganizationMembers` active row count for the org | **Confirmed live 2026-08-31.** RockPointe Church's app screen shows "889 Members," an exact match to the query's `FollowerCountGuess` of 889 for that org. Note the app UI itself labels this "Members," not "Followers" — same underlying count, just different label text; keep calling it Followers in the report since that's Ari's requested column name. |
+| Posts (count) | `dbo.UserPost` rows where `OrganizationId` matches and `DeletedDate IS NULL` | Medium-high — 211/252 rows show 0 posts (matches the general low-engagement pattern expected church-wide), non-zero rows concentrate sensibly on active SM volunteer team channels and one inactive ReNew step-group channel (25 posts). Not independently UI-confirmed row-by-row, but consistent with the one visible data point (RockPointe Church's screenshot shows a pinned post from "3 months ago," and its `PostCountGuess` was 4 — plausible, not an exact-count check since older/unpinned posts weren't visible in the screenshot). |
+
+All fields are confident enough to build `RPC_ChannelReport.py` against. Deployed report: `channel-report/RPC_ChannelReport.py` (see that folder's README).
+
+---
+
 ## Registrations (Online Registration / RegQuestion / RegAnswer) — confirmed 2026-08-17
 
 Registration data lives in its own table set, separate from `Meetings`/`Attendance`. Confirmed live against the "SM: Man Up Meal Sign Up 2026-2027" registration (OrganizationId 4053).
@@ -764,6 +784,20 @@ Only ~21 open candidate pairs is low relative to the roundtable's "a ton of dupl
 
 ---
 
+## Email Queue / Delegation Tables — confirmed 2026-08-31
+
+Discovered while troubleshooting the CM attendance email no-send (see `attendance-dashboard/BACKLOG.md`). `model.Email(...)` doesn't send synchronously — it inserts into `dbo.EmailQueue`, which a separate process picks up. This table is the ground truth for "did a script's email actually get invoked," independent of anything the Python script itself prints.
+
+| Table | Role |
+|---|---|
+| `dbo.EmailQueue` | One row per `model.Email(...)` call. Key columns: `Id`, `Queued`/`Started`/`Sent` (all `datetime`; `Sent IS NULL` after `Started` is populated = attempted but not completed), `FromAddr`, `FromName`, `QueuedBy` (PeopleId), `Subject`, `Error` (nvarchar — populated on failure), `ReadyToSend`, `Testing`, `SendFromOrgId`. **A missing row entirely (not just an empty `Error`) means `model.Email` was never called for that send** — e.g. a `model.CallScript("WrongName")` silently no-op'ing rather than the target script's own logic failing. |
+| `dbo.EmailQueueTo` | Per-recipient breakdown of a queued email. `PeopleId`, `OrgId`, `Sent`, plus per-recipient failure flags: `Bounced`, `SpamReport`, `Blocked`, `Expired`, `Invalid`, `BouncedAddress`, `Error`. |
+| `dbo.EmailQueueToFail` / `dbo.FailedEmails` (view) | Recipient-level failure/bounce events, separate from the queue-level `Error` column. |
+| `dbo.EmailLog` | Simple sent-mail log: `fromaddr`, `toaddr`, `time`, `subject`. |
+| `dbo.EmailDelegation` (view) / `dbo.PeopleCanEmailFor` (table) | Backs TouchPoint's "Email Delegation" admin feature (Admin > Communication > Email Delegation) — one PeopleId emailing on behalf of another *TouchPoint user* account. Confirmed this is unrelated to `model.Email`'s `from`/`name` string arguments: neither `studentministry@rockpointechurch.org` nor `childrensministry@rockpointechurch.org` exists as a `People.EmailAddress`/`EmailAddress2` value (0 rows either way), yet the SM one sends live — so `model.Email`'s `from` address is a free-form string, not validated against any People/User record or a delegation entry. |
+
+---
+
 ## Special Content - Deployed Scripts
 
 | Tab | Name | Status |
@@ -778,33 +812,38 @@ Only ~21 open candidate pairs is low relative to the roundtable's "a ton of dupl
 | Python Scripts | RPC_AttendanceRoster (was AD_ReNewRosterReport, generalized 2026-08-30 -- church-wide, no longer AD-specific) | Built 2026-08-26, generalized + extended 2026-08-30, needs live TouchPoint test pass. Three-stage live Program -> Division -> Involvement(s) picker (any active RPC ministry, `EXCLUDED_PROGRAM_IDS` hides internal reporting/admin Programs, row-level security via `model.UserPeopleId` scopes non-admins to ministries/divisions they're actually in), multi-involvement selection with a combined attendance grid, configurable roster columns, Gender/Involvement/None grouping -- see `attendance-roster-report/README.md`. `ADMIN_BYPASS_PEOPLE_IDS` = [47110, 7059] (Brian Vinson, Marlene Godinez -- Brian's PeopleId confirmed 2026-08-30, not previously recorded elsewhere in this repo). |
 | Python Scripts | TPxi_RollSheet (community tool, TPxi Software/Ben Swaby, RPC fork) | Not yet deployed/live-tested. Self-update mechanism (fetches code from a third-party server and overwrites the deployed script) stripped for RPC before testing -- see `roll-sheet-report/README.md`. No `MemberTypeId` filter on its roster query, unlike `RPC_AttendanceRoster` -- known gap, not yet decided. |
 | Python Scripts | TP_DuplicatePersonFinder (was RPC_DuplicatePersonFinder, renamed 2026-08-27 -- generic-portable, no RPC-specific IDs) | Live-tested by Brian 2026-08-26/27 (2026 summit roundtable follow-up), judged a clear improvement after performance and household-false-positive fixes. Read-only nickname-aware + fuzzy duplicate-person audit report, scoped to recently-created People, excludes pairs already in native `dbo.Duplicate` -- see `duplicate-finder/README.md`. |
+| Python Scripts | RPC_ChannelReport | Built 2026-08-31 for Arianah Torres/Marlene Godinez. Underlying SQL validated live (252 channel-enabled involvements); the script itself not yet deployed/run in TouchPoint. Church-wide mobile-app Channels report (ID/Name/Type/Campus/Photo/Public/Leaders/Followers/Posts/Active-Inactive) with a Status filter (All/Active/Inactive) -- "Inactive Only" is Ari's app-cleanup worklist. No picker or row-level security (small named audience). See `channel-report/README.md` and the "Mobile App Channels" section above. |
 
 ---
 
 ## MorningBatch (Python Script)
-Current contents:
+Current contents -- confirmed live 2026-08-31 (Brian pasted the actual script
+body; this replaces an earlier, stale "current contents" note that only
+listed the first line and had SM/CM additions marked "approved"/"pending"
+when they were in fact already live):
 ```python
 model.CallScript("RegistrationsWithoutAccountCodes")
-```
-Approved addition for the weekly SM attendance report:
-```python
-if model.DayOfWeek == 1:
+if model.DayOfWeek == 2:  # Tuesday mornings
+    model.CallScript('SM_OutstandingTaskNotifications')
+if model.DayOfWeek == 1:  # Monday
     model.CallScript("SM_AttendanceDashboardEmail")
-```
-
-Approved addition for the weekly CM attendance report -- recipient list
-confirmed and PREVIEW_MODE flipped to False 2026-08-30 (14 names, see
-attendance-dashboard/BACKLOG.md and CM_AttendanceDashboardEmail.py's header):
-```python
-if model.DayOfWeek == 1:
+if model.DayOfWeek == 4:  # Thursday mornings
+    model.CallScript("SM_AttendanceDashboardEmail")
+if model.DayOfWeek == 1:  # Monday
     model.CallScript("CM_AttendanceDashboardEmail")
 ```
 
-Still pending for outstanding-task notifications:
-```python
-if model.DayOfWeek == 2:
-    model.CallScript("SM_OutstandingTaskNotifications")
-```
+**Bug found and fixed 2026-08-31 (see attendance-dashboard/BACKLOG.md for
+full troubleshooting):** the last line calls `"CM_AttendanceDashboardEmail"`,
+but the live Special Content Python script was actually saved as
+`CM_AttendanceReportEmail`. `model.CallScript` is fire-and-forget with no
+return value/error surfaced to the caller, so calling a name that doesn't
+exist is a silent no-op -- confirmed via `dbo.EmailQueue` (SM's Monday send
+had a row; CM had none, ever). Brian renamed the live script to
+`CM_AttendanceDashboardEmail` to match this line, this repo's file name, and
+the `SM_AttendanceDashboardEmail` convention, then ran it live -- confirmed
+sent (new `dbo.EmailQueue` row with `Sent` populated). The `MorningBatch`
+listing above is accurate as of this fix; no further edit needed here.
 
 ---
 
