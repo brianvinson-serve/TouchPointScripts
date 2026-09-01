@@ -24,6 +24,21 @@ one shared set of columns (the union of meeting dates across every selected
 involvement); if the selected involvements don't actually share a schedule,
 the grid will be sparse and "Total" won't mean what you'd want.
 
+An optional "Attendance since" date input (blank by default -- full
+history) restricts both the meeting-date columns and the Total column to
+meetings on/after that date -- e.g. a Student Ministry involvement with
+several school years of history under one org, printed for just the
+current school year. Same query-string round-trip as the column/grouping
+choices (&SinceDate=YYYY-MM-DD), validated with a strict regex before it
+ever reaches SQL.
+
+A second optional checkbox, "Exclude members with zero attendance,"
+(unchecked/off by default) drops anyone whose attendance count in the
+range above is zero -- e.g. a printed roster of only students who actually
+showed up this school year, versus everyone still carried as a member.
+Applied after Total is computed but before grouping, so section counts,
+headers, and the page's total-member-count all reflect the trimmed list.
+
 Three-step picker driven live from dbo.Program / dbo.Division / DivOrg --
 no ministry-specific config to maintain:
   1. No ?ProgId= yet: pick a ministry (Program).
@@ -159,6 +174,17 @@ GROUP_BY_OPTIONS = [
 GROUP_BY_KEYS = [k for k, _ in GROUP_BY_OPTIONS]
 DEFAULT_GROUP_BY = "gender"
 
+# Optional attendance-grid start date (stage 3's "Attendance since" date
+# input, YYYY-MM-DD -- the format an HTML5 <input type="date"> submits).
+# When set, the meeting-date columns and Total only cover meetings on/after
+# this date -- e.g. an involvement with several years of history (a
+# graduating senior's single Student Ministry class) printed for just this
+# school year. Empty string means no filter, the original all-time
+# behavior. Validated with a strict regex before ever reaching SQL, since
+# unlike every other query input here it isn't an int or a value drawn from
+# a fixed option list.
+DEFAULT_SINCE_DATE = ""
+
 # ============================================================
 # Helpers
 # ============================================================
@@ -211,6 +237,14 @@ def valid_field_key(value, default):
 
 def valid_group_by(value):
     return value if value in GROUP_BY_KEYS else DEFAULT_GROUP_BY
+
+
+def valid_since_date(value):
+    # Strict YYYY-MM-DD only (what an HTML5 date input submits) -- anything
+    # else (blank, malformed, a paste gone wrong) falls back to "no filter"
+    # rather than being trusted into SQL.
+    value = str(value or "").strip()
+    return value if re.match(r"^\d{4}-\d{2}-\d{2}$", value) else DEFAULT_SINCE_DATE
 
 
 def field_value(key, p):
@@ -284,7 +318,7 @@ def render_picker(step_title, heading, meta_text, select_name, options_html, hid
     )
 
 
-def render_org_and_options_picker(org_rows, selected_program, selected_division, col1, col2, group_by):
+def render_org_and_options_picker(org_rows, selected_program, selected_division, col1, col2, group_by, since_date, exclude_zero):
     # No pre-checking: this stage is only ever reached with zero validly-
     # selected orgs (any valid OrgIds jump straight to stage 4), so there's
     # never a prior selection worth restoring here.
@@ -353,6 +387,13 @@ def render_org_and_options_picker(org_rows, selected_program, selected_division,
     <label for="GroupBy">Group roster by</label>
     <select name="GroupBy" id="GroupBy">{group_options}</select>
   </div>
+  <div class="field">
+    <label for="SinceDate">Attendance since (optional -- leave blank for full history)</label>
+    <input type="date" name="SinceDate" id="SinceDate" value="{since_date}">
+  </div>
+  <div class="field">
+    <label class="checklabel"><input type="checkbox" name="ExcludeZero" value="1"{exclude_zero_checked}> Exclude members with zero attendance (within the date range above, if set)</label>
+  </div>
   <button type="submit">Apply</button>
 </form>
 <script>
@@ -378,6 +419,8 @@ document.getElementById('pickerForm').addEventListener('submit', function(e) {{
             col1_options=field_options_html(col1),
             col2_options=field_options_html(col2),
             group_options=group_options_html,
+            since_date=esc(since_date),
+            exclude_zero_checked=' checked' if exclude_zero else '',
         )
     )
 
@@ -530,9 +573,11 @@ else:
         col1 = valid_field_key(str(getattr(model.Data, "Col1", "") or ""), DEFAULT_COL1)
         col2 = valid_field_key(str(getattr(model.Data, "Col2", "") or ""), DEFAULT_COL2)
         group_by = valid_group_by(str(getattr(model.Data, "GroupBy", "") or ""))
+        since_date = valid_since_date(str(getattr(model.Data, "SinceDate", "") or ""))
+        exclude_zero = str(getattr(model.Data, "ExcludeZero", "") or "") == "1"
 
         if not selected_org_ids:
-            render_org_and_options_picker(org_rows, selected_program, selected_division, col1, col2, group_by)
+            render_org_and_options_picker(org_rows, selected_program, selected_division, col1, col2, group_by, since_date, exclude_zero)
 
         else:
             # ============================================================
@@ -542,14 +587,22 @@ else:
             selected_org_names = [r.OrganizationName for r in org_rows if r.OrganizationId in selected_org_ids]
             org_label = " + ".join(selected_org_names) if len(selected_org_names) > 1 else selected_org_names[0]
 
+            # since_date is already validated as strict YYYY-MM-DD (or "") by
+            # valid_since_date() before it ever reaches here.
+            since_date_clause = (
+                "AND CAST(m.MeetingDate AS DATE) >= '{0}'".format(since_date)
+                if since_date else ""
+            )
+
             sql_meetings = """
             SELECT DISTINCT CAST(m.MeetingDate AS DATE) AS MeetingDate
             FROM dbo.Meetings m
             WHERE m.OrganizationId IN ({org_ids})
               AND ISNULL(m.Canceled, 0) = 0
               AND ISNULL(m.DidNotMeet, 0) = 0
+              {since_date_clause}
             ORDER BY MeetingDate
-            """.format(org_ids=org_ids_str)
+            """.format(org_ids=org_ids_str, since_date_clause=since_date_clause)
 
             # Only Leader/Member MemberTypeIds; sorted by Involvement (so a
             # multi-org combined roster naturally groups by org even before
@@ -599,7 +652,8 @@ else:
               AND ISNULL(a.NoShow, 0) = 0
               AND ISNULL(m.Canceled, 0) = 0
               AND ISNULL(m.DidNotMeet, 0) = 0
-            """.format(org_ids=org_ids_str)
+              {since_date_clause}
+            """.format(org_ids=org_ids_str, since_date_clause=since_date_clause)
 
             meeting_rows = list(q.QuerySql(sql_meetings))
             roster_rows = list(q.QuerySql(sql_roster))
@@ -610,6 +664,15 @@ else:
             attended_by_person = {}
             for r in attend_rows:
                 attended_by_person.setdefault(r.PeopleId, set()).add(normalize_date(r.MeetingDate))
+
+            # Optional: drop anyone with zero attended meetings in the
+            # (possibly since_date-filtered) range above -- e.g. printing
+            # only students who've actually shown up this school year.
+            # Filtered before grouping so section counts/headers and the
+            # page meta line's total_count reflect the trimmed list, not
+            # the full membership.
+            if exclude_zero:
+                roster_rows = [p for p in roster_rows if attended_by_person.get(p.PeopleId)]
 
             def build_rows_html(people):
                 rows = []
@@ -704,9 +767,12 @@ else:
             # render_org_and_options_picker's note on why it doesn't
             # pre-check anything). Same behavior as the original single-
             # select version's back link.
-            back_href = "?ProgId={0}&amp;DivId={1}&amp;Col1={2}&amp;Col2={3}&amp;GroupBy={4}".format(
-                selected_program.Id, selected_division.Id, col1, col2, group_by
+            back_href = "?ProgId={0}&amp;DivId={1}&amp;Col1={2}&amp;Col2={3}&amp;GroupBy={4}&amp;SinceDate={5}&amp;ExcludeZero={6}".format(
+                selected_program.Id, selected_division.Id, col1, col2, group_by, since_date, "1" if exclude_zero else ""
             )
+
+            since_date_meta = " since {0}".format(esc(since_date)) if since_date else ""
+            exclude_zero_meta = " &middot; excluding zero-attendance members" if exclude_zero else ""
 
             print(
                 """<!DOCTYPE html>
@@ -737,7 +803,7 @@ else:
 <body>
 <p class="no-print"><a href="{back_href}">&larr; Choose different involvement(s)</a></p>
 <h1>{org_label} -- Roster</h1>
-<p class="meta">{org_count} involvement(s) &middot; {meeting_count} meeting(s) through {last_date} &middot; {total_count} total member(s)</p>
+<p class="meta">{org_count} involvement(s) &middot; {meeting_count} meeting(s){since_date_meta} through {last_date} &middot; {total_count} total member(s){exclude_zero_meta}</p>
 {sections}
 </body>
 </html>""".format(
@@ -745,6 +811,8 @@ else:
                     back_href=back_href,
                     org_count=len(selected_org_ids),
                     meeting_count=len(meeting_dates),
+                    since_date_meta=since_date_meta,
+                    exclude_zero_meta=exclude_zero_meta,
                     last_date=esc(fmt_col_header(meeting_dates[-1])) if meeting_dates else "n/a",
                     total_count=len(roster_rows),
                     sections=sections_html,

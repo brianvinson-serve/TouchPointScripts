@@ -1,6 +1,6 @@
 # Ministry Attendance Roster Report
 
-Printable Leader/Member roster + weekly attendance grid for one or more active involvements in **any RPC ministry** — a three-step live picker (Ministry → Division → Involvement(s)) replaces the original config list, so a new ministry, division, or involvement shows up automatically with no code change. Two roster columns and the grouping/page-break behavior are configurable per print run.
+Printable Leader/Member roster + weekly attendance grid for one or more active involvements in **any RPC ministry** — a three-step live picker (Ministry → Division → Involvement(s)) replaces the original config list, so a new ministry, division, or involvement shows up automatically with no code change. Two roster columns, the grouping/page-break behavior, and an optional attendance start date are configurable per print run.
 
 ## History
 
@@ -12,7 +12,7 @@ Originally `AD_ReNewRosterReport.py`, built for Adult Discipleship's ReNew minis
 
 1. **No `ProgId`** — pick a ministry (`dbo.Program`).
 2. **`ProgId` set, no `DivId`** — pick a division within that ministry (`dbo.Division`).
-3. **`ProgId`+`DivId` set, no valid `OrgIds`** — check one or more active (`OrganizationStatusId = 30`) involvements in that division (with member counts), plus pick the two configurable columns and the grouping mode.
+3. **`ProgId`+`DivId` set, no valid `OrgIds`** — check one or more active (`OrganizationStatusId = 30`) involvements in that division (with member counts), plus pick the two configurable columns, the grouping mode, and an optional attendance start date.
 4. **A valid `OrgIds` present** — the combined roster for the checked involvement(s), with the chosen columns/grouping.
 
 A stale or invalid id/option at any stage falls back to re-rendering that stage (e.g. a bookmarked URL for a division that no longer exists just reopens the division picker) rather than erroring. Each stage has a "Back" link to the previous one; the roster's back link intentionally omits `OrgIds` (so it lands on the checkbox picker, not a re-render of the same roster) but preserves the column/grouping choices.
@@ -54,6 +54,16 @@ WHERE TABLE_NAME IN ('People', 'Families')
   AND (COLUMN_NAME LIKE '%Address%' OR COLUMN_NAME LIKE '%City%' OR COLUMN_NAME LIKE '%State%' OR COLUMN_NAME LIKE '%Zip%')
 ORDER BY TABLE_NAME, COLUMN_NAME
 ```
+
+## Attendance since (optional date filter)
+
+A fourth stage-3 field, "Attendance since," is a plain HTML5 date input, blank by default. When set, both the meeting-date grid columns and the Total column only cover meetings on/after that date — e.g. Student Ministry involvements where a senior's single class has meeting/attendance history going back several school years, printed for just the current school year (`8/16/2026` forward). Leaving it blank keeps the original all-time behavior.
+
+Round-trips through the URL the same way as the column/grouping choices (`&SinceDate=YYYY-MM-DD`), and is preserved across the roster's "Back" link. Validated with a strict `^\d{4}-\d{2}-\d{2}$` regex before it's ever interpolated into SQL — anything else (blank, malformed, a bad paste) silently falls back to no filter rather than erroring or reaching the query.
+
+## Exclude zero-attendance members (optional)
+
+A checkbox next to the date field, unchecked by default, drops anyone whose attendance count (within the "Attendance since" range, if set) is zero — e.g. a printed roster of only students who actually showed up this school year, rather than the full class list including no-shows. Round-trips as `&ExcludeZero=1`. Applied after Total is computed but before grouping, so section counts/headers and the page's total-member count all reflect the trimmed list.
 
 ## Grouping / page breaks
 
@@ -103,6 +113,8 @@ Round 1–2 history (single hardcoded org, then the AD-only division-driven pick
 Round 3 (2026-08-30): generalized to the three-stage live Program/Division/Involvement picker.
 
 Round 4 (same day): configurable columns (incl. "Leave Blank"), a unified Gender/Involvement/None grouping dropdown, multi-involvement selection via checkboxes, and row-level security via `model.UserPeopleId`.
+
+Round 5 (2026-08-31): optional "Attendance since" date filter and "Exclude zero-attendance members" checkbox (see above), requested for Student Ministry involvements with several school years of history under one class/org.
 
 **First live run (2026-08-30) found a real bug**: the Address column threw `Invalid column name 'City'`/`'State'` — `People.City`/`People.State` don't exist on RPC's schema. Removed (see "Configurable columns" above for the discovery query to run before re-adding it). Everything else in that same run was not reported as broken.
 
