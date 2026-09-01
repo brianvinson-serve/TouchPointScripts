@@ -1,67 +1,10 @@
-# SM Staff Task Dashboard
+# SM Staff Task Dashboard (retired 2026-08-31)
 
-Standalone TouchPoint dashboard for RockPointe Student Ministry outstanding tasks.
+Removed. `SM_StaffTaskDashboard.py` was an on-demand, interactive-only in-TouchPoint page (visit the Special Content "run script" link, apply filters) that was never scheduled or emailed -- it was never deployed live in TouchPoint (status was "Built, needs live TouchPoint test pass"), so retiring it required no TouchPoint-side cleanup, just removing it from this repo.
 
-## What it does
+It was retired in favor of **`SM_StaffTaskDigestEmail.py`** (`../deployment/SM_StaffTaskDigestEmail.py`), which answers Max McCalley's actual request -- a weekly email he automatically receives Monday mornings with SM staff task status/age -- rather than a page someone has to remember to go look at. The digest reuses this dashboard's query shape and the SM staff roster (with the confirmed Weston Watts off-staff correction applied), plus `RPC_StaffTaskDashboard.py`'s "accountable = assignee if set, else owner" convention. See the script's own header comment for deployment/scheduling steps (this project's `deployment/` folder documents each script inline rather than in a separate README).
 
-`SM_StaffTaskDashboard.py` renders an in-TouchPoint dashboard from `TaskNote` data showing:
-
-- Outstanding tasks by owner
-- Outstanding tasks by assignee
-- Task age
-- Due-date status
-- Task detail with links back to the about-person TouchPoint profile
-
-It filters to the confirmed Student Ministry staff/volunteer PeopleId list currently documented in `../../DB_REFERENCE.md`.
-
-## Why this is not a Linear dashboard
-
-The dashboard needs to live in TouchPoint because `TaskNote` is TouchPoint-native data and Brian will copy/paste the Special Content Python script into TouchPoint for live testing.
-
-Linear is still useful as a project/backlog tracker for enhancement requests and bugs discovered while testing this dashboard. It should not be the runtime display unless we later build a deliberate TouchPoint-to-Linear sync, and that would be a separate project with its own failure modes. Dude, making a sync layer before the basic dashboard works would be backwards.
-
-## TouchPoint Deployment
-
-- Type: Python Script
-- TouchPoint path: `Admin > Advanced > Special Content > Python Scripts > +New`
-- Script name: `SM_StaffTaskDashboard`
-- Source file: `outstanding-task-notifications/dashboard/SM_StaffTaskDashboard.py`
-- Source data: `TaskNote`
-- Dependencies: TouchPoint runtime globals `model`, `q`, and `Data`
-
-## Test steps
-
-1. In TouchPoint, create or update Python Script `SM_StaffTaskDashboard` with the contents of `SM_StaffTaskDashboard.py`.
-2. Run the script from TouchPoint Special Content.
-3. Confirm the top metrics render.
-4. Confirm the detail view shows columns for Owner, Assignee, About, Status, Age, Due, Task, and TaskNoteId.
-5. Test filters:
-   - Owner = one SM staff member
-   - Assignee = one SM staff member
-   - Age = 7+ days
-   - Due date = Overdue
-   - View = Summary by owner
-   - View = Summary by assignee
-6. Spot-check a few rows against the native TouchPoint task list.
-
-## Expected caveats
-
-- Local validation can only check Python syntax. The query and rendered dashboard still need live TouchPoint execution.
-- The SM staff list is hardcoded. Update `SM_STAFF` and `DB_REFERENCE.md` when staff changes.
-- The dashboard intentionally excludes `New Person Data Entry%` tasks to match the existing SM reminder behavior.
-- Task filtering uses `(IsNote = 0 OR IsNote IS NULL)` defensively, but the 2026-08-13 full RPC profile found current tasks at `IsNote = 0` and no `NULL` `IsNote` rows.
-
-## Linear backlog recommendation
-
-If Brian wants to use Linear for this project, create a small RockPointe/TouchPoint backlog after the first live test pass, with issues for:
-
-- TouchPoint runtime errors
-- Query/schema mismatches
-- Filter/UI enhancements
-- Staff-list updates
-- Deployment polish
-
-Do not sync `TaskNote` records into Linear unless we intentionally decide to build a separate integration.
+If a filterable, on-demand, whole-team view is wanted again later, `RPC_StaffTaskDashboard.py` below already covers Student Ministry as part of its church-wide department rollup (filter by Department = "Student Ministry" or by individual staff member) -- prefer extending that over reintroducing a parallel SM-only dashboard.
 
 ---
 
@@ -138,7 +81,7 @@ Cards are color-coded by task age using the same bucket labels/thresholds as `RP
 
 ## Bug fixed (2026-08-31): KeyError on first live run
 
-Brian's first live test threw `KeyError: The given key was not present in the dictionary.` The `<style>` block's CSS is built inside a Python string that's piped through `.format(viewer=...)` -- `.format()` treats every single `{`/`}` as a placeholder, and raw CSS rules like `.rpc-my-board { ... }` have dozens of them. Fixed by escaping the CSS body's braces to `{{ }}` so only the intended `{viewer}` placeholder resolves. Verified locally by executing the fixed block with a mock `model`/`q`, and by rendering the full script end-to-end -- both come back clean. Checked the two sibling scripts (`RPC_StaffTaskDashboard.py`, `SM_StaffTaskDashboard.py`) for the same pattern: both keep their CSS `print()` separate from any `.format()` call, so they don't have this bug.
+Brian's first live test threw `KeyError: The given key was not present in the dictionary.` The `<style>` block's CSS is built inside a Python string that's piped through `.format(viewer=...)` -- `.format()` treats every single `{`/`}` as a placeholder, and raw CSS rules like `.rpc-my-board { ... }` have dozens of them. Fixed by escaping the CSS body's braces to `{{ }}` so only the intended `{viewer}` placeholder resolves. Verified locally by executing the fixed block with a mock `model`/`q`, and by rendering the full script end-to-end -- both come back clean. Checked the sibling script `RPC_StaffTaskDashboard.py` for the same pattern: it keeps its CSS `print()` separate from any `.format()` call, so it doesn't have this bug.
 
 ## Security gap closed (2026-08-31)
 

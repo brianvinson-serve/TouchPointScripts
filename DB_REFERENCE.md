@@ -321,12 +321,11 @@ The 12-recipient production PeopleId list was resolved from the live whole-domai
 | 40594 | Haven Burton |
 | 36696 | Joshua Watson |
 | 28000 | Abbie Vinson |
-| 19570 | Weston Watts |
 | 118 | Shawn Adams |
 
 Update the DECLARE @SMStaff block in SM_TaskNote-ToDo.sql when staff changes.
 
-**Correction, confirmed 2026-08-26:** Weston Watts (19570) is no longer on staff. This list (and `SM_TaskNote-ToDo.sql`'s `@SMStaff` table, and `SM_StaffTaskDashboard.py`'s `SM_STAFF` list) still has him as active — needs updating next time either script is touched. He's already handled correctly in the newer church-wide roster below (bucketed `Unassigned` rather than removed, so any orphaned tasks of his stay visible).
+**Correction, confirmed 2026-08-26, applied 2026-08-31:** Weston Watts (19570) is no longer on staff and has been removed from this list and from `SM_StaffTaskDigestEmail.py`'s `SM_STAFF` list (the script that replaced `SM_StaffTaskDashboard.py`, retired 2026-08-31). `SM_TaskNote-ToDo.sql`'s `@SMStaff` table still needs the same update next time that script is touched. The church-wide roster below already handles him correctly (bucketed `Unassigned` rather than removed, so any orphaned tasks of his stay visible).
 
 ---
 
@@ -805,7 +804,7 @@ Discovered while troubleshooting the CM attendance email no-send (see `attendanc
 | SQL Scripts | SM_TaskNote-ToDo | Deployed, filter still being tuned |
 | Python Scripts | SM_OutstandingTasksList | Not yet deployed |
 | Python Scripts | SM_OutstandingTaskNotifications | Deployed, tested 2026-07-03 |
-| Python Scripts | SM_StaffTaskDashboard | Built, needs live TouchPoint test pass |
+| Python Scripts | SM_StaffTaskDigestEmail | Built 2026-08-31, needs live TouchPoint test pass. Weekly Monday-morning email to Max McCalley (SM Leader) summarizing every SM staff member's outstanding-task status/age (per-staff summary table + worst-first detail). Replaces `SM_StaffTaskDashboard` (retired 2026-08-31 -- was on-demand only, never scheduled/emailed, never deployed live). See `outstanding-task-notifications/dashboard/README.md`. |
 | Python Scripts | RPC_StaffTaskDashboard | Live-tested by Brian 2026-08-26; Alan reviewing. Reachable only via Special Content "run script" link -- not yet added as a page for other staff. |
 | Python Scripts | RPC_MyTaskBoard | Built 2026-08-26. Live test 2026-08-31 hit a `KeyError` from unescaped CSS braces inside a `.format()` call -- fixed, needs a fresh live pass (STRING_AGG support still unconfirmed). Personal Kanban-style "my tasks" view, read-only v1. Unsafe `?pid=` admin override removed 2026-08-31 -- see `outstanding-task-notifications/dashboard/README.md`. |
 | Python Scripts | RPC_MyTasksWidget | Built 2026-08-31, needs live TouchPoint test pass. Compact TouchPoint Homepage Widget sibling of RPC_MyTaskBoard -- worst-first list of up to 5 open tasks + overdue badge, links out to the full Kanban board. `model.UserPeopleId`-scoped only, no admin override. See `outstanding-task-notifications/dashboard/README.md`. |
@@ -832,6 +831,18 @@ if model.DayOfWeek == 4:  # Thursday mornings
 if model.DayOfWeek == 1:  # Monday
     model.CallScript("CM_AttendanceDashboardEmail")
 ```
+
+**Pending addition (not yet live):** `SM_StaffTaskDigestEmail`, gated the same
+way as the Monday attendance emails above:
+```python
+if model.DayOfWeek == 1:  # Monday
+    model.CallScript("SM_StaffTaskDigestEmail")
+```
+Add this line to the live `MorningBatch` script only after `SM_StaffTaskDigestEmail`
+itself has been deployed and live-tested (see its own file header for test steps)
+and its `TEST_MODE` has been flipped to `False` -- do not schedule a script that
+is still in preview mode, it will silently do nothing (`TEST_MODE = True` never
+calls `model.Email`).
 
 **Bug found and fixed 2026-08-31 (see attendance-dashboard/BACKLOG.md for
 full troubleshooting):** the last line calls `"CM_AttendanceDashboardEmail"`,
