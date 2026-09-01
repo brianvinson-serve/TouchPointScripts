@@ -25,29 +25,34 @@ collapse, FK cascade across dozens of tables) and TouchPoint's own Admin
 merge tool already does that correctly -- every row here links to each
 person's TouchPoint profile so staff can review and merge there themselves.
 
-## How it works (full detail in duplicate-finder/README.md)
+## Architecture -- GET shell + AJAX scan (2026-09-01)
 
-1. Pull the "recent" set: People created in the last LOOKBACK_DAYS (proxy
-   for "came in through a recent registration" -- see ORIGIN_FILTER_IDS
-   below for a tighter filter once confirmed live).
-2. Find candidate matches via SQL-side "blocking": a UNION of single-key
-   joins (not one big OR -- see the SQL performance note in the README)
-   catches a SOUNDEX-equivalent last name, a matching email (full address
-   or local-part only, so a domain typo still blocks in), a matching
-   phone (cell/home/work), or a birth date that's exact or a documented
-   near-miss (day/month transposed, year off by <=9, day off by one).
-3. In Python, score each pair 0-100: nickname-aware + fuzzy first/last
-   name matching (pure-Python Levenshtein -- no pip packages available in
-   this sandbox), FUZZY email/phone/DOB scoring (a typo/transposition
-   earns partial credit, not zero), and two household-aware adjustments:
-   shared contact info between different people in an already-linked
-   household is NOT scored as duplicate evidence, and a not-yet-linked
-   household pair (e.g. siblings) is routed to its own report section
-   instead of the duplicate tiers.
-4. Exclude any pair already present in dbo.Duplicate (either column order).
-5. Render an HTML report grouped by confidence tier (High/Medium/Low) plus
-   the separate household-link section, each row linking to both people's
-   TouchPoint profiles.
+The original version ran the whole pipeline (SQL blocking query, Python
+fuzzy scoring over every candidate pair, HTML render) synchronously on a
+single GET request. With a 120-day/500-row window that's a genuinely slow
+query, so the browser sat on a blank tab for the full duration -- reported
+by Brian as "takes forever to load."
+
+Restructured as a single-file mini-app, same pattern as this repo's
+roll-sheet-report/TPxi_RollSheet.py (an upstream TPxi Software tool):
+  - GET renders an HTML shell instantly: header, legend (static, doesn't
+    need a scan to render), a lookback-days input, Quick/Full scan buttons,
+    and an empty results area. No heavy query runs on GET.
+  - A cheap COUNT(*) fires via AJAX on page load to fill in the "recently
+    created" stat tile fast, independent of the expensive fuzzy-match pass.
+  - Quick scan / Full scan POST to the same script (model.HttpMethod ==
+    "post"), run the real pipeline server-side, and return JSON (counts +
+    a pre-rendered HTML fragment for the results area) that JS injects
+    without a page reload.
+  - Quick scan uses a short, capped window (QUICK_SCAN_DAYS /
+    QUICK_SCAN_MAX_ROWS below) as a fast first pass; Full scan uses the
+    configured LOOKBACK_DAYS/MAX_RECENT_ROWS (or the Days field's value).
+
+The scoring/blocking logic itself (SQL blocking query, score_pair(), the
+household-aware adjustments) is unchanged from the original version -- see
+"How it works" in duplicate-finder/README.md for full detail. Only the
+driver at the bottom of this file changed shape, from "always print the
+full page" to "print an HTML shell on GET, print a JSON fragment on POST."
 
 ## Needs live TouchPoint confirmation before this is trusted as-is
 
@@ -58,33 +63,50 @@ person's TouchPoint profile so staff can review and merge there themselves.
   actual registration-created records instead of every new record.
 - SOUNDEX blocking performance against RPC's live People table size is
   unverified -- MAX_RECENT_ROWS below is a defensive cap; lower it if the
-  live run is slow.
+  live run is slow. The new Quick scan mode gives a fast first pass while
+  that's being confirmed.
 - The nickname table is a general-purpose common-English list, not
   RPC-specific -- extend NICKNAME_CLUSTERS as real misses turn up.
+- The AJAX shell/scan split above has not yet been live-tested against RPC
+  (only the original synchronous version was, 2026-08-26/27). Confirm the
+  GET shell loads instantly and both Quick/Full scan buttons return results
+  before treating this as validated.
 
 Deploy: Admin > Advanced > Special Content > Python Scripts > +New
 Script name suggestion: TP_DuplicatePersonFinder (named generically, not
 RPC_-prefixed like this repo's other RockPointe-specific scripts, since
 this one has no RPC-specific IDs/names and is portable to any TouchPoint
 church as-is -- see duplicate-finder/README.md's Portability section).
-Access via /PyScript/TP_DuplicatePersonFinder (or the Special Content
-admin "run" preview -- this report takes no user input, so either works).
+Access via /PyScriptForm/TP_DuplicatePersonFinder -- use the Form path
+directly (not /PyScript/), since AJAX POSTs need it. An earlier version of
+this script had a client-side redirect from /PyScript/ to /PyScriptForm/
+(copied from this repo's roll-sheet-report/TPxi_RollSheet.py without
+confirming it was needed here); it was removed 2026-09-01 after causing a
+blank page on live test -- see the changelog note above the entry point at
+the bottom of this file.
 No email is sent; no data is written.
 """
 
+import json
 import re
 
 # ============================================================
 # Config
 # ============================================================
 
-# How far back to look for "recently created" People records.
-# Overridable per-run via ?Days=NN in the URL.
+# How far back to look for "recently created" People records on a Full
+# scan. Overridable per-run via the Days input (POST) or ?Days=NN in the
+# URL (pre-fills that input on GET).
 LOOKBACK_DAYS = 120
 
-# Safety cap on how many recent records get fuzzy-matched in one run.
+# Safety cap on how many recent records get fuzzy-matched in one Full scan.
 # If RPC's live People table makes this slow, lower this first.
 MAX_RECENT_ROWS = 500
+
+# Quick scan: a fast, narrow first pass -- last N days, capped low -- so
+# staff get an answer in seconds instead of waiting on the full window.
+QUICK_SCAN_DAYS = 30
+QUICK_SCAN_MAX_ROWS = 150
 
 # Cap on how many candidate matches are shown per recent person, so one
 # extremely common last name (e.g. "Smith") can't flood the report.
@@ -511,54 +533,88 @@ def person_link(cms_host, p):
     )
 
 
-# ============================================================
-# Query params
-# ============================================================
-lookback_days = to_int(getattr(model.Data, "Days", ""), LOOKBACK_DAYS)
-if lookback_days <= 0:
-    lookback_days = LOOKBACK_DAYS
+def cap_per_recent_person(rows):
+    # Cap candidates shown per recent person (highest score first --
+    # caller must already have sorted `rows` descending by score).
+    per_person_count = {}
+    capped = []
+    for row in rows:
+        rid = row["recent"].PeopleId
+        per_person_count[rid] = per_person_count.get(rid, 0) + 1
+        if per_person_count[rid] <= MAX_CANDIDATES_PER_PERSON:
+            capped.append(row)
+    return capped
 
-origin_filter_sql = ""
-if ORIGIN_FILTER_IDS:
-    origin_filter_sql = "AND p.OriginId IN ({0})".format(
-        ", ".join(str(i) for i in ORIGIN_FILTER_IDS)
+
+def build_tier_html(tier_name, rows, cms_host):
+    if not rows:
+        return ""
+    body_rows = []
+    for row in rows:
+        recent_p = row["recent"]
+        cand_p = row["candidate"]
+        body_rows.append(
+            "<tr><td>{recent_link}</td><td>{cand_link}</td>"
+            "<td class=\"score\">{score}</td><td>{badges}</td></tr>".format(
+                recent_link=person_link(cms_host, recent_p),
+                cand_link=person_link(cms_host, cand_p),
+                score=row["score"],
+                badges=signal_badges(row["signals"]) or "&mdash;",
+            )
+        )
+    return """
+<div class="tier tier-{tier_class}">
+  <h2>{tier_name} confidence <span class="count">({count})</span></h2>
+  <table>
+    <thead><tr><th>Recently created</th><th>Possible existing match</th><th>Score</th><th>Signals</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+""".format(
+        tier_class=tier_name.lower(),
+        tier_name=esc(tier_name),
+        count=len(rows),
+        rows="".join(body_rows),
     )
 
-# ============================================================
-# SQL: recent People (candidate "just registered" set)
-# ============================================================
-sql_recent = """
-SELECT TOP {max_recent}
-    p.PeopleId, p.FirstName, p.NickName, p.PreferredName, p.LastName,
-    p.EmailAddress, p.EmailAddress2, p.CellPhone, p.HomePhone, p.WorkPhone,
-    p.BirthYear, p.BirthMonth, p.BirthDay, p.FamilyId, p.CreatedDate
-FROM dbo.People p
-WHERE p.CreatedDate >= DATEADD(day, -{days}, GETDATE())
-  AND ISNULL(p.ArchivedFlag, 0) = 0
-  AND ISNULL(p.IsDeceased, 0) = 0
-  AND ISNULL(p.IsBusiness, 0) = 0
-  {origin_filter}
-ORDER BY p.CreatedDate DESC
-""".format(max_recent=MAX_RECENT_ROWS, days=lookback_days, origin_filter=origin_filter_sql)
 
-recent_rows = list(q.QuerySql(sql_recent))
-recent_ids_sql = ", ".join(str(r.PeopleId) for r in recent_rows) or "-1"
+def build_household_gap_html(rows, cms_host):
+    if not rows:
+        return ""
+    body_rows = []
+    for row in rows:
+        recent_p = row["recent"]
+        cand_p = row["candidate"]
+        body_rows.append(
+            "<tr><td>{recent_link}</td><td>{cand_link}</td>"
+            "<td class=\"score\">{score}</td><td>{badges}</td></tr>".format(
+                recent_link=person_link(cms_host, recent_p),
+                cand_link=person_link(cms_host, cand_p),
+                score=row["score"],
+                badges=signal_badges(row["signals"]) or "&mdash;",
+            )
+        )
+    return """
+<div class="tier tier-household">
+  <h2>Household link to verify <span class="count">({count})</span></h2>
+  <p class="section-note">
+    These pairs are NOT flagged as possible duplicates -- their first names clearly don't match.
+    They share a last name plus at least two of email/phone/birth-date, but aren't currently linked
+    as the same household (<code>FamilyId</code>) in TouchPoint. That's often siblings or a
+    parent/child whose records just haven't been connected yet -- worth a quick check on whether
+    the family link is missing, or whether it's simply a coincidence (e.g. a shared phone with an
+    unrelated person).
+  </p>
+  <table>
+    <thead><tr><th>Recently created</th><th>Possible household match</th><th>Score</th><th>Signals</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div>
+""".format(count=len(rows), rows="".join(body_rows))
+
 
 # ============================================================
-# SQL: bulk candidate-pair pre-filter ("blocking") against the recent set.
-# This only decides who's WORTH fuzzy-scoring in Python -- it is
-# deliberately looser than an exact match so a fat-fingered phone/email
-# still gets pulled in (fine-grained near-miss scoring happens in
-# score_pair()). Excludes pairs already tracked in dbo.Duplicate.
-#
-#   - SOUNDEX-equivalent last name (typos, spelling variants)
-#   - exact-normalized email, checked BOTH full-address (domain included)
-#     and local-part-only (so a domain typo like gmial.com vs gmail.com
-#     still blocks in even though the full address won't match)
-#   - exact-normalized phone (punctuation/spacing stripped) -- this was
-#     missing from blocking entirely before 2026-08-26; phone-only matches
-#     were silently invisible to this report until this fix
-#   - identical full birth date
+# SQL builders (blocking query helpers)
 # ============================================================
 def sql_norm_phone(col):
     # Strip common phone punctuation/spacing before comparing digits.
@@ -618,310 +674,275 @@ def person_norm_select(alias):
     )
 
 
-# NOTE: the recent side is filtered down to the (small, capped) recent-ID
-# list INSIDE its own CTE, before any join happens.
-#
-# A second, less obvious problem showed up after the first fix (a 2026-08-26
-# live test still timed out): a JOIN condition that ORs together several
-# UNRELATED column pairs (last name OR email OR phone OR DOB) generally
-# can't be planned by SQL Server as a single efficient hash/index join, even
-# when every column involved is precomputed -- there's no single shared key
-# to build a hash table on, so the optimizer commonly falls back to a
-# nested-loop scan of the whole candidate set per recent row and evaluates
-# the big OR as a residual filter. That's still O(recent x candidates) even
-# though each individual comparison got cheaper.
-#
-# Fix: decompose the OR into a UNION of separate joins, each on exactly ONE
-# equality key (or, for the DOB near-miss rules, a two-column equality key
-# with a cheap residual range check on an already-narrowed set). SQL Server
-# can plan each branch as its own efficient hash/index join; UNION then
-# dedupes any pair matched by more than one signal. Email and phone are
-# first "flattened" (one row per non-null value, e.g. up to 2 email rows /
-# 3 phone rows per person) so the multiple candidate fields become a single
-# join key too, rather than an IN-list on both sides.
-sql_pairs = """
-;WITH RecentNorm AS (
-    {recent_norm_select}
-    WHERE {a}.PeopleId IN ({recent_ids})
-),
-CandidateNorm AS (
-    {candidate_norm_select}
-    WHERE ISNULL({a}.ArchivedFlag, 0) = 0
-      AND ISNULL({a}.IsDeceased, 0) = 0
-      AND ISNULL({a}.IsBusiness, 0) = 0
-),
-RecentEmails AS (
-    SELECT PeopleId, EmailNorm1 AS V FROM RecentNorm WHERE EmailNorm1 IS NOT NULL
-    UNION ALL
-    SELECT PeopleId, EmailNorm2 FROM RecentNorm WHERE EmailNorm2 IS NOT NULL
-),
-CandidateEmails AS (
-    SELECT PeopleId, EmailNorm1 AS V FROM CandidateNorm WHERE EmailNorm1 IS NOT NULL
-    UNION ALL
-    SELECT PeopleId, EmailNorm2 FROM CandidateNorm WHERE EmailNorm2 IS NOT NULL
-),
-RecentEmailLocals AS (
-    SELECT PeopleId, EmailLocal1 AS V FROM RecentNorm WHERE EmailLocal1 IS NOT NULL
-    UNION ALL
-    SELECT PeopleId, EmailLocal2 FROM RecentNorm WHERE EmailLocal2 IS NOT NULL
-),
-CandidateEmailLocals AS (
-    SELECT PeopleId, EmailLocal1 AS V FROM CandidateNorm WHERE EmailLocal1 IS NOT NULL
-    UNION ALL
-    SELECT PeopleId, EmailLocal2 FROM CandidateNorm WHERE EmailLocal2 IS NOT NULL
-),
-RecentPhones AS (
-    SELECT PeopleId, PhoneNorm1 AS V FROM RecentNorm WHERE PhoneNorm1 IS NOT NULL
-    UNION ALL
-    SELECT PeopleId, PhoneNorm2 FROM RecentNorm WHERE PhoneNorm2 IS NOT NULL
-    UNION ALL
-    SELECT PeopleId, PhoneNorm3 FROM RecentNorm WHERE PhoneNorm3 IS NOT NULL
-),
-CandidatePhones AS (
-    SELECT PeopleId, PhoneNorm1 AS V FROM CandidateNorm WHERE PhoneNorm1 IS NOT NULL
-    UNION ALL
-    SELECT PeopleId, PhoneNorm2 FROM CandidateNorm WHERE PhoneNorm2 IS NOT NULL
-    UNION ALL
-    SELECT PeopleId, PhoneNorm3 FROM CandidateNorm WHERE PhoneNorm3 IS NOT NULL
-),
-MatchPairs AS (
-    -- Last name (SOUNDEX-equivalent)
-    SELECT r.PeopleId AS RecentId, c.PeopleId AS CandidateId
-    FROM RecentNorm r JOIN CandidateNorm c
-      ON c.LNSoundex = r.LNSoundex AND c.PeopleId <> r.PeopleId
-    WHERE r.LNSoundex IS NOT NULL
-
-    UNION
-
-    -- Email, full address
-    SELECT r.PeopleId, c.PeopleId
-    FROM RecentEmails r JOIN CandidateEmails c
-      ON c.V = r.V AND c.PeopleId <> r.PeopleId
-
-    UNION
-
-    -- Email, local-part only (catches a domain typo)
-    SELECT r.PeopleId, c.PeopleId
-    FROM RecentEmailLocals r JOIN CandidateEmailLocals c
-      ON c.V = r.V AND c.PeopleId <> r.PeopleId
-
-    UNION
-
-    -- Phone, any of cell/home/work on either side
-    SELECT r.PeopleId, c.PeopleId
-    FROM RecentPhones r JOIN CandidatePhones c
-      ON c.V = r.V AND c.PeopleId <> r.PeopleId
-
-    UNION
-
-    -- DOB: month+day exact (equality key), year within 9 -- covers an
-    -- exact match (year diff 0) and a plausible single mistyped year digit
-    -- in one pass; dob_score() in Python determines which of those it is.
-    SELECT r.PeopleId, c.PeopleId
-    FROM RecentNorm r JOIN CandidateNorm c
-      ON c.BirthMonth = r.BirthMonth AND c.BirthDay = r.BirthDay AND c.PeopleId <> r.PeopleId
-    WHERE r.BirthMonth IS NOT NULL AND r.BirthDay IS NOT NULL
-      AND r.BirthYear IS NOT NULL AND c.BirthYear IS NOT NULL
-      AND ABS(c.BirthYear - r.BirthYear) <= 9
-
-    UNION
-
-    -- DOB: year+month exact (equality key), day off by exactly one
-    SELECT r.PeopleId, c.PeopleId
-    FROM RecentNorm r JOIN CandidateNorm c
-      ON c.BirthYear = r.BirthYear AND c.BirthMonth = r.BirthMonth AND c.PeopleId <> r.PeopleId
-    WHERE r.BirthDay IS NOT NULL AND c.BirthDay IS NOT NULL
-      AND ABS(c.BirthDay - r.BirthDay) = 1
-
-    UNION
-
-    -- DOB: year exact (equality key), month/day transposed (14/5 vs 5/14)
-    SELECT r.PeopleId, c.PeopleId
-    FROM RecentNorm r JOIN CandidateNorm c
-      ON c.BirthYear = r.BirthYear AND c.BirthMonth = r.BirthDay AND c.BirthDay = r.BirthMonth
-     AND c.PeopleId <> r.PeopleId
-    WHERE r.BirthMonth IS NOT NULL AND r.BirthDay IS NOT NULL AND r.BirthMonth <> r.BirthDay
-)
-SELECT
-    mp.RecentId, mp.CandidateId, c.PeopleId,
-    c.FirstName, c.NickName, c.PreferredName, c.LastName,
-    c.EmailAddress, c.EmailAddress2, c.CellPhone, c.HomePhone, c.WorkPhone,
-    c.BirthYear, c.BirthMonth, c.BirthDay, c.FamilyId
-FROM MatchPairs mp
-JOIN dbo.People c ON c.PeopleId = mp.CandidateId
-WHERE NOT EXISTS (
-      SELECT 1 FROM dbo.Duplicate d
-      WHERE (d.id1 = mp.RecentId AND d.id2 = mp.CandidateId)
-         OR (d.id1 = mp.CandidateId AND d.id2 = mp.RecentId)
-  )
-""".format(
-    recent_norm_select=person_norm_select("p"),
-    candidate_norm_select=person_norm_select("p"),
-    a="p",
-    recent_ids=recent_ids_sql,
-)
-
-candidate_rows = list(q.QuerySql(sql_pairs)) if recent_rows else []
-
-# ============================================================
-# Python: score every candidate pair, dedupe unordered pairs, tier + sort.
-# ============================================================
-recent_by_id = {r.PeopleId: r for r in recent_rows}
-
-seen_pairs = set()
-scored = []
-household_gaps = []
-for c in candidate_rows:
-    pair_key = tuple(sorted((c.RecentId, c.CandidateId)))
-    if pair_key in seen_pairs:
-        continue
-    seen_pairs.add(pair_key)
-
-    recent_person = recent_by_id.get(c.RecentId)
-    if recent_person is None:
-        continue
-
-    score, signals = score_pair(recent_person, c)
-    row = {
-        "recent": recent_person,
-        "candidate": c,
-        "score": score,
-        "signals": signals,
-    }
-
-    # Household-link-gap pairs are routed out entirely, never into the
-    # duplicate tiers -- they're a different KIND of finding (a probable
-    # missing family link, not a possible duplicate identity) and get their
-    # own section below. Checked before the TIER_MEDIUM_MIN cutoff because
-    # dampening these pairs' email/phone contribution can legitimately push
-    # their score under that threshold even though the gap itself is a
-    # confident, separately-thresholded signal (see HOUSEHOLD_GAP_* above).
-    if signals["household_link_gap"]:
-        household_gaps.append(row)
-        continue
-
-    if score < TIER_MEDIUM_MIN:
-        continue
-
-    row["tier"] = tier_for(score)
-    scored.append(row)
-
-scored.sort(key=lambda x: x["score"], reverse=True)
-household_gaps.sort(key=lambda x: x["score"], reverse=True)
-
-
-def cap_per_recent_person(rows):
-    # Cap candidates shown per recent person (highest score first --
-    # caller must already have sorted `rows` descending by score).
-    per_person_count = {}
-    capped = []
-    for row in rows:
-        rid = row["recent"].PeopleId
-        per_person_count[rid] = per_person_count.get(rid, 0) + 1
-        if per_person_count[rid] <= MAX_CANDIDATES_PER_PERSON:
-            capped.append(row)
-    return capped
-
-
-scored = cap_per_recent_person(scored)
-household_gaps = cap_per_recent_person(household_gaps)
-
-tiers = {"High": [], "Medium": [], "Low": []}
-for row in scored:
-    tiers[row["tier"]].append(row)
-
-# ============================================================
-# Render
-# ============================================================
-cms_host = model.CmsHost
-
-
-def build_tier_html(tier_name, rows):
-    if not rows:
+def origin_filter_sql():
+    if not ORIGIN_FILTER_IDS:
         return ""
-    body_rows = []
-    for row in rows:
-        recent_p = row["recent"]
-        cand_p = row["candidate"]
-        body_rows.append(
-            "<tr><td>{recent_link}</td><td>{cand_link}</td>"
-            "<td class=\"score\">{score}</td><td>{badges}</td></tr>".format(
-                recent_link=person_link(cms_host, recent_p),
-                cand_link=person_link(cms_host, cand_p),
-                score=row["score"],
-                badges=signal_badges(row["signals"]) or "&mdash;",
-            )
-        )
-    return """
-<div class="tier tier-{tier_class}">
-  <h2>{tier_name} confidence <span class="count">({count})</span></h2>
-  <table>
-    <thead><tr><th>Recently created</th><th>Possible existing match</th><th>Score</th><th>Signals</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-</div>
-""".format(
-        tier_class=tier_name.lower(),
-        tier_name=esc(tier_name),
-        count=len(rows),
-        rows="".join(body_rows),
+    return "AND p.OriginId IN ({0})".format(", ".join(str(i) for i in ORIGIN_FILTER_IDS))
+
+
+# ============================================================
+# Fast stat: cheap COUNT(*) for the "recently created" tile, independent
+# of the expensive fuzzy-match pass below. This is what makes the initial
+# page load feel instant -- it mirrors sql_recent's WHERE clause with no
+# join at all.
+# ============================================================
+def count_recent(lookback_days):
+    sql = """
+    SELECT COUNT(*) AS Cnt
+    FROM dbo.People p
+    WHERE p.CreatedDate >= DATEADD(day, -{days}, GETDATE())
+      AND ISNULL(p.ArchivedFlag, 0) = 0
+      AND ISNULL(p.IsDeceased, 0) = 0
+      AND ISNULL(p.IsBusiness, 0) = 0
+      {origin_filter}
+    """.format(days=lookback_days, origin_filter=origin_filter_sql())
+    rows = list(q.QuerySql(sql))
+    return int(rows[0].Cnt) if rows else 0
+
+
+# ============================================================
+# The real pipeline: recent set -> SQL blocking -> Python fuzzy scoring ->
+# render. This is the slow part, now only run from an AJAX POST (Quick or
+# Full scan), never on the initial GET.
+# ============================================================
+def run_scan(lookback_days, max_recent):
+    sql_recent = """
+    SELECT TOP {max_recent}
+        p.PeopleId, p.FirstName, p.NickName, p.PreferredName, p.LastName,
+        p.EmailAddress, p.EmailAddress2, p.CellPhone, p.HomePhone, p.WorkPhone,
+        p.BirthYear, p.BirthMonth, p.BirthDay, p.FamilyId, p.CreatedDate
+    FROM dbo.People p
+    WHERE p.CreatedDate >= DATEADD(day, -{days}, GETDATE())
+      AND ISNULL(p.ArchivedFlag, 0) = 0
+      AND ISNULL(p.IsDeceased, 0) = 0
+      AND ISNULL(p.IsBusiness, 0) = 0
+      {origin_filter}
+    ORDER BY p.CreatedDate DESC
+    """.format(max_recent=max_recent, days=lookback_days, origin_filter=origin_filter_sql())
+
+    recent_rows = list(q.QuerySql(sql_recent))
+    recent_ids_sql = ", ".join(str(r.PeopleId) for r in recent_rows) or "-1"
+
+    # Bulk candidate-pair pre-filter ("blocking") against the recent set.
+    # This only decides who's WORTH fuzzy-scoring in Python -- it is
+    # deliberately looser than an exact match so a fat-fingered phone/email
+    # still gets pulled in (fine-grained near-miss scoring happens in
+    # score_pair()). Excludes pairs already tracked in dbo.Duplicate.
+    #
+    # The recent side is filtered down to the (small, capped) recent-ID
+    # list INSIDE its own CTE, before any join happens, and the join
+    # condition is decomposed into a UNION of single-key joins rather than
+    # one big OR -- see the SQL performance note in duplicate-finder/README.md
+    # for why: SQL Server can't plan an OR across unrelated columns as an
+    # efficient hash/index join even when every column is precomputed, and
+    # falls back to an O(recent x candidates) nested-loop scan. Email and
+    # phone are first "flattened" (one row per non-null value) so the
+    # multiple candidate fields become a single join key too.
+    sql_pairs = """
+    ;WITH RecentNorm AS (
+        {recent_norm_select}
+        WHERE {a}.PeopleId IN ({recent_ids})
+    ),
+    CandidateNorm AS (
+        {candidate_norm_select}
+        WHERE ISNULL({a}.ArchivedFlag, 0) = 0
+          AND ISNULL({a}.IsDeceased, 0) = 0
+          AND ISNULL({a}.IsBusiness, 0) = 0
+    ),
+    RecentEmails AS (
+        SELECT PeopleId, EmailNorm1 AS V FROM RecentNorm WHERE EmailNorm1 IS NOT NULL
+        UNION ALL
+        SELECT PeopleId, EmailNorm2 FROM RecentNorm WHERE EmailNorm2 IS NOT NULL
+    ),
+    CandidateEmails AS (
+        SELECT PeopleId, EmailNorm1 AS V FROM CandidateNorm WHERE EmailNorm1 IS NOT NULL
+        UNION ALL
+        SELECT PeopleId, EmailNorm2 FROM CandidateNorm WHERE EmailNorm2 IS NOT NULL
+    ),
+    RecentEmailLocals AS (
+        SELECT PeopleId, EmailLocal1 AS V FROM RecentNorm WHERE EmailLocal1 IS NOT NULL
+        UNION ALL
+        SELECT PeopleId, EmailLocal2 FROM RecentNorm WHERE EmailLocal2 IS NOT NULL
+    ),
+    CandidateEmailLocals AS (
+        SELECT PeopleId, EmailLocal1 AS V FROM CandidateNorm WHERE EmailLocal1 IS NOT NULL
+        UNION ALL
+        SELECT PeopleId, EmailLocal2 FROM CandidateNorm WHERE EmailLocal2 IS NOT NULL
+    ),
+    RecentPhones AS (
+        SELECT PeopleId, PhoneNorm1 AS V FROM RecentNorm WHERE PhoneNorm1 IS NOT NULL
+        UNION ALL
+        SELECT PeopleId, PhoneNorm2 FROM RecentNorm WHERE PhoneNorm2 IS NOT NULL
+        UNION ALL
+        SELECT PeopleId, PhoneNorm3 FROM RecentNorm WHERE PhoneNorm3 IS NOT NULL
+    ),
+    CandidatePhones AS (
+        SELECT PeopleId, PhoneNorm1 AS V FROM CandidateNorm WHERE PhoneNorm1 IS NOT NULL
+        UNION ALL
+        SELECT PeopleId, PhoneNorm2 FROM CandidateNorm WHERE PhoneNorm2 IS NOT NULL
+        UNION ALL
+        SELECT PeopleId, PhoneNorm3 FROM CandidateNorm WHERE PhoneNorm3 IS NOT NULL
+    ),
+    MatchPairs AS (
+        -- Last name (SOUNDEX-equivalent)
+        SELECT r.PeopleId AS RecentId, c.PeopleId AS CandidateId
+        FROM RecentNorm r JOIN CandidateNorm c
+          ON c.LNSoundex = r.LNSoundex AND c.PeopleId <> r.PeopleId
+        WHERE r.LNSoundex IS NOT NULL
+
+        UNION
+
+        -- Email, full address
+        SELECT r.PeopleId, c.PeopleId
+        FROM RecentEmails r JOIN CandidateEmails c
+          ON c.V = r.V AND c.PeopleId <> r.PeopleId
+
+        UNION
+
+        -- Email, local-part only (catches a domain typo)
+        SELECT r.PeopleId, c.PeopleId
+        FROM RecentEmailLocals r JOIN CandidateEmailLocals c
+          ON c.V = r.V AND c.PeopleId <> r.PeopleId
+
+        UNION
+
+        -- Phone, any of cell/home/work on either side
+        SELECT r.PeopleId, c.PeopleId
+        FROM RecentPhones r JOIN CandidatePhones c
+          ON c.V = r.V AND c.PeopleId <> r.PeopleId
+
+        UNION
+
+        -- DOB: month+day exact (equality key), year within 9 -- covers an
+        -- exact match (year diff 0) and a plausible single mistyped year digit
+        -- in one pass; dob_score() in Python determines which of those it is.
+        SELECT r.PeopleId, c.PeopleId
+        FROM RecentNorm r JOIN CandidateNorm c
+          ON c.BirthMonth = r.BirthMonth AND c.BirthDay = r.BirthDay AND c.PeopleId <> r.PeopleId
+        WHERE r.BirthMonth IS NOT NULL AND r.BirthDay IS NOT NULL
+          AND r.BirthYear IS NOT NULL AND c.BirthYear IS NOT NULL
+          AND ABS(c.BirthYear - r.BirthYear) <= 9
+
+        UNION
+
+        -- DOB: year+month exact (equality key), day off by exactly one
+        SELECT r.PeopleId, c.PeopleId
+        FROM RecentNorm r JOIN CandidateNorm c
+          ON c.BirthYear = r.BirthYear AND c.BirthMonth = r.BirthMonth AND c.PeopleId <> r.PeopleId
+        WHERE r.BirthDay IS NOT NULL AND c.BirthDay IS NOT NULL
+          AND ABS(c.BirthDay - r.BirthDay) = 1
+
+        UNION
+
+        -- DOB: year exact (equality key), month/day transposed (14/5 vs 5/14)
+        SELECT r.PeopleId, c.PeopleId
+        FROM RecentNorm r JOIN CandidateNorm c
+          ON c.BirthYear = r.BirthYear AND c.BirthMonth = r.BirthDay AND c.BirthDay = r.BirthMonth
+         AND c.PeopleId <> r.PeopleId
+        WHERE r.BirthMonth IS NOT NULL AND r.BirthDay IS NOT NULL AND r.BirthMonth <> r.BirthDay
+    )
+    SELECT
+        mp.RecentId, mp.CandidateId, c.PeopleId,
+        c.FirstName, c.NickName, c.PreferredName, c.LastName,
+        c.EmailAddress, c.EmailAddress2, c.CellPhone, c.HomePhone, c.WorkPhone,
+        c.BirthYear, c.BirthMonth, c.BirthDay, c.FamilyId
+    FROM MatchPairs mp
+    JOIN dbo.People c ON c.PeopleId = mp.CandidateId
+    WHERE NOT EXISTS (
+          SELECT 1 FROM dbo.Duplicate d
+          WHERE (d.id1 = mp.RecentId AND d.id2 = mp.CandidateId)
+             OR (d.id1 = mp.CandidateId AND d.id2 = mp.RecentId)
+      )
+    """.format(
+        recent_norm_select=person_norm_select("p"),
+        candidate_norm_select=person_norm_select("p"),
+        a="p",
+        recent_ids=recent_ids_sql,
     )
 
+    candidate_rows = list(q.QuerySql(sql_pairs)) if recent_rows else []
 
-def build_household_gap_html(rows):
-    if not rows:
-        return ""
-    body_rows = []
-    for row in rows:
-        recent_p = row["recent"]
-        cand_p = row["candidate"]
-        body_rows.append(
-            "<tr><td>{recent_link}</td><td>{cand_link}</td>"
-            "<td class=\"score\">{score}</td><td>{badges}</td></tr>".format(
-                recent_link=person_link(cms_host, recent_p),
-                cand_link=person_link(cms_host, cand_p),
-                score=row["score"],
-                badges=signal_badges(row["signals"]) or "&mdash;",
-            )
-        )
+    # Python: score every candidate pair, dedupe unordered pairs, tier + sort.
+    recent_by_id = {r.PeopleId: r for r in recent_rows}
+
+    seen_pairs = set()
+    scored = []
+    household_gaps = []
+    for c in candidate_rows:
+        pair_key = tuple(sorted((c.RecentId, c.CandidateId)))
+        if pair_key in seen_pairs:
+            continue
+        seen_pairs.add(pair_key)
+
+        recent_person = recent_by_id.get(c.RecentId)
+        if recent_person is None:
+            continue
+
+        score, signals = score_pair(recent_person, c)
+        row = {
+            "recent": recent_person,
+            "candidate": c,
+            "score": score,
+            "signals": signals,
+        }
+
+        # Household-link-gap pairs are routed out entirely, never into the
+        # duplicate tiers -- they're a different KIND of finding (a probable
+        # missing family link, not a possible duplicate identity) and get their
+        # own section below. Checked before the TIER_MEDIUM_MIN cutoff because
+        # dampening these pairs' email/phone contribution can legitimately push
+        # their score under that threshold even though the gap itself is a
+        # confident, separately-thresholded signal (see HOUSEHOLD_GAP_* above).
+        if signals["household_link_gap"]:
+            household_gaps.append(row)
+            continue
+
+        if score < TIER_MEDIUM_MIN:
+            continue
+
+        row["tier"] = tier_for(score)
+        scored.append(row)
+
+    scored.sort(key=lambda x: x["score"], reverse=True)
+    household_gaps.sort(key=lambda x: x["score"], reverse=True)
+
+    scored = cap_per_recent_person(scored)
+    household_gaps = cap_per_recent_person(household_gaps)
+
+    tiers = {"High": [], "Medium": [], "Low": []}
+    for row in scored:
+        tiers[row["tier"]].append(row)
+
+    cms_host = model.CmsHost
+    sections_html = (
+        build_tier_html("High", tiers["High"], cms_host)
+        + build_tier_html("Medium", tiers["Medium"], cms_host)
+        + build_tier_html("Low", tiers["Low"], cms_host)
+    )
+    if not scored:
+        sections_html = '<p class="empty">No likely duplicates found among People created in the last {0} day(s), beyond what dbo.Duplicate already tracks.</p>'.format(lookback_days)
+    sections_html += build_household_gap_html(household_gaps, cms_host)
+
+    return {
+        "recent_count": len(recent_rows),
+        "high": len(tiers["High"]),
+        "medium": len(tiers["Medium"]),
+        "low": len(tiers["Low"]),
+        "household_gap_count": len(household_gaps),
+        "sections_html": sections_html,
+        "lookback_days": lookback_days,
+        "max_recent": max_recent,
+    }
+
+
+def build_legend_html():
     return """
-<div class="tier tier-household">
-  <h2>Household link to verify <span class="count">({count})</span></h2>
-  <p class="section-note">
-    These pairs are NOT flagged as possible duplicates -- their first names clearly don't match.
-    They share a last name plus at least two of email/phone/birth-date, but aren't currently linked
-    as the same household (<code>FamilyId</code>) in TouchPoint. That's often siblings or a
-    parent/child whose records just haven't been connected yet -- worth a quick check on whether
-    the family link is missing, or whether it's simply a coincidence (e.g. a shared phone with an
-    unrelated person).
-  </p>
-  <table>
-    <thead><tr><th>Recently created</th><th>Possible household match</th><th>Score</th><th>Signals</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
-</div>
-""".format(count=len(rows), rows="".join(body_rows))
-
-
-sections_html = (
-    build_tier_html("High", tiers["High"])
-    + build_tier_html("Medium", tiers["Medium"])
-    + build_tier_html("Low", tiers["Low"])
-)
-
-if not scored:
-    sections_html = '<p class="empty">No likely duplicates found among People created in the last {0} day(s), beyond what dbo.Duplicate already tracks.</p>'.format(lookback_days)
-
-sections_html += build_household_gap_html(household_gaps)
-
-legend_html = """
 <details class="legend" open>
   <summary>How to read this report</summary>
   <div class="legend-tiers">
-    <span class="badge tier-chip tier-chip-high">High confidence</span> score &ge; {tier_high} &mdash; strong overlap, worth a close look.
-    <span class="badge tier-chip tier-chip-medium">Medium confidence</span> score &ge; {tier_medium} &mdash; some overlap, less certain.
-    <span class="legend-plain">Below {tier_medium} isn't shown at all.</span>
-    <span class="badge tier-chip tier-chip-household">Household link to verify</span> a separate, non-duplicate finding &mdash; see below.
+    <div class="legend-tier-row"><span class="badge tier-chip tier-chip-high">High confidence</span> score &ge; {tier_high} &mdash; strong overlap, worth a close look.</div>
+    <div class="legend-tier-row"><span class="badge tier-chip tier-chip-medium">Medium confidence</span> score &ge; {tier_medium} &mdash; some overlap, less certain. <span class="legend-plain">Below {tier_medium} isn't shown at all.</span></div>
+    <div class="legend-tier-row"><span class="badge tier-chip tier-chip-household">Household link to verify</span> a separate, non-duplicate finding &mdash; see below.</div>
   </div>
   <table class="legend-table">
     <tr><td><span class="badge badge-email">Email match</span></td><td>The two records share the exact same email address.</td></tr>
@@ -937,112 +958,341 @@ legend_html = """
 </details>
 """.format(tier_high=TIER_HIGH_MIN, tier_medium=TIER_MEDIUM_MIN)
 
-print(
-    """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>Possible Duplicate People -- Last {days} Days</title>
-<style>
-  :root {{
-    --ink: #1c2530;
-    --ink-muted: #5b6673;
-    --border: #e1e5ea;
-    --panel: #f8f9fb;
-    --email: #0b5fa5;
-    --email-bg: #e8f1fa;
-    --phone: #a05a00;
-    --phone-bg: #faf1e3;
-    --dob: #8a3d68;
-    --dob-bg: #f6e9f1;
-    --family: #55606b;
-    --family-bg: #eef0f2;
-    --high: #0b3d78;
-    --medium: #3f7cc9;
-    --low: #7c8a9a;
-    --household: #0f766e;
-  }}
-  * {{ box-sizing: border-box; }}
-  body {{
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    margin: 24px; color: var(--ink); background: #fff; line-height: 1.45;
-  }}
-  h1 {{ font-size: 21px; margin: 0 0 4px; font-weight: 600; }}
-  h2 {{ font-size: 15px; margin: 0 0 4px; font-weight: 600; color: var(--ink); }}
-  .meta {{ color: var(--ink-muted); font-size: 13px; margin: 0 0 16px; max-width: 900px; }}
-  .count {{ font-weight: 400; color: var(--ink-muted); font-size: 12px; }}
-  .empty {{ color: var(--ink-muted); }}
-  .section-note {{ color: var(--ink-muted); font-size: 12px; max-width: 900px; margin: 2px 0 0; }}
 
-  .legend {{
-    border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
-    padding: 10px 16px; margin-bottom: 20px; max-width: 900px;
-  }}
-  .legend summary {{ cursor: pointer; font-weight: 600; font-size: 13px; color: var(--ink); padding: 4px 0; }}
-  .legend-tiers {{ font-size: 12px; color: var(--ink-muted); margin: 10px 0; line-height: 2.1; }}
-  .legend-plain {{ color: var(--ink-muted); margin-right: 6px; }}
-  .legend-table {{ width: 100%; border-collapse: collapse; margin-top: 4px; }}
-  .legend-table td {{ border: none; padding: 3px 8px 3px 0; font-size: 12px; color: var(--ink-muted); vertical-align: middle; }}
-  .legend-table td:first-child {{ white-space: nowrap; width: 1%; }}
-  .legend-note {{ font-size: 11.5px; color: var(--ink-muted); margin: 8px 0 0; font-style: italic; }}
+# ============================================================
+# AJAX HANDLERS (POST) -- the heavy work, run only on demand
+# ============================================================
+def main():
+    if model.HttpMethod == "post":
+        action = str(getattr(model.Data, "action", "") or "")
+    
+        if action == "count":
+            try:
+                days = to_int(getattr(model.Data, "days", ""), LOOKBACK_DAYS)
+                if days <= 0:
+                    days = LOOKBACK_DAYS
+                print(json.dumps({
+                    "success": True,
+                    "recent_count": count_recent(days),
+                    "lookback_days": days,
+                }))
+            except Exception as e:
+                print(json.dumps({"success": False, "message": str(e)}))
+    
+        elif action == "scan":
+            try:
+                mode = str(getattr(model.Data, "mode", "") or "full")
+                if mode == "quick":
+                    lookback_days = QUICK_SCAN_DAYS
+                    max_recent = QUICK_SCAN_MAX_ROWS
+                else:
+                    mode = "full"
+                    lookback_days = to_int(getattr(model.Data, "days", ""), LOOKBACK_DAYS)
+                    if lookback_days <= 0:
+                        lookback_days = LOOKBACK_DAYS
+                    max_recent = MAX_RECENT_ROWS
+    
+                result = run_scan(lookback_days, max_recent)
+                result["success"] = True
+                result["mode"] = mode
+                print(json.dumps(result))
+            except Exception as e:
+                print(json.dumps({"success": False, "message": str(e)}))
+    
+        else:
+            print(json.dumps({"success": False, "message": "Unknown action: " + action}))
+    
+    # ============================================================
+    # HTML SHELL (GET) -- renders instantly, no heavy query runs here
+    # ============================================================
+    else:
+        initial_days = to_int(getattr(model.Data, "Days", ""), LOOKBACK_DAYS)
+        if initial_days <= 0:
+            initial_days = LOOKBACK_DAYS
+    
+        print(
+            """<!DOCTYPE html>
+    <html lang="en">
+    <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Possible Duplicate People</title>
+    <style>
+      :root {{
+        --ink: #1c2530;
+        --ink-muted: #5b6673;
+        --border: #e1e5ea;
+        --panel: #f8f9fb;
+        --email: #0b5fa5;
+        --email-bg: #e8f1fa;
+        --phone: #a05a00;
+        --phone-bg: #faf1e3;
+        --dob: #8a3d68;
+        --dob-bg: #f6e9f1;
+        --family: #55606b;
+        --family-bg: #eef0f2;
+        --high: #0b3d78;
+        --medium: #3f7cc9;
+        --low: #7c8a9a;
+        --household: #0f766e;
+        --accent: #0b5fa5;
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        margin: 24px; color: var(--ink); background: #fff; line-height: 1.45;
+      }}
+      h1 {{ font-size: 21px; margin: 0 0 4px; font-weight: 600; }}
+      h2 {{ font-size: 15px; margin: 0 0 4px; font-weight: 600; color: var(--ink); }}
+      .meta {{ color: var(--ink-muted); font-size: 13px; margin: 0 0 16px; max-width: 900px; }}
+      .count {{ font-weight: 400; color: var(--ink-muted); font-size: 12px; }}
+      .empty {{ color: var(--ink-muted); }}
+      .section-note {{ color: var(--ink-muted); font-size: 12px; max-width: 900px; margin: 2px 0 0; }}
+    
+      .stat-row {{ display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 14px; margin: 16px 0 18px; width: 100%; }}
+      .stat-tile {{
+        display: block !important;
+        flex: 1 1 0 !important; min-width: 0 !important; width: auto !important; float: none !important;
+        border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+        padding: 10px 16px;
+      }}
+      .stat-tile .stat-label {{ font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.03em; }}
+      .stat-tile .stat-value {{ font-size: 22px; font-weight: 700; color: var(--ink); margin-top: 2px; }}
+      .stat-tile.stat-high .stat-value {{ color: var(--high); }}
+      .stat-tile.stat-medium .stat-value {{ color: var(--medium); }}
+      .stat-tile.stat-household .stat-value {{ color: var(--household); }}
+    
+      .control-bar {{
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        border: 1px solid var(--border); border-radius: 8px; background: #fff;
+        padding: 12px 16px; margin-bottom: 18px;
+      }}
+      .control-bar label {{ font-size: 12px; color: var(--ink-muted); }}
+      .control-bar input[type=number] {{
+        width: 70px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+      }}
+      .btn {{
+        border: 1px solid var(--accent); background: var(--accent); color: #fff;
+        border-radius: 6px; padding: 7px 14px; font-size: 13px; font-weight: 600;
+        cursor: pointer;
+      }}
+      .btn:hover {{ opacity: 0.92; }}
+      .btn:disabled {{ opacity: 0.5; cursor: default; }}
+      .btn-secondary {{ background: #fff; color: var(--accent); }}
+      .scan-status {{ font-size: 12.5px; color: var(--ink-muted); }}
+      .spinner {{
+        display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+        border: 2px solid var(--border); border-top-color: var(--accent);
+        animation: spin 0.7s linear infinite; margin-right: 6px; vertical-align: -1px;
+      }}
+      @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+      .error-banner {{
+        display: none; border: 1px solid #c0392b; background: #fdecea; color: #922b21;
+        border-radius: 6px; padding: 8px 12px; font-size: 12.5px; margin-bottom: 14px; max-width: 900px;
+      }}
+    
+      .legend {{
+        border: 1px solid var(--border); border-radius: 8px; background: var(--panel);
+        padding: 10px 16px; margin-bottom: 20px; max-width: 900px;
+      }}
+      .legend summary {{ cursor: pointer; font-weight: 600; font-size: 13px; color: var(--ink); padding: 4px 0; }}
+      .legend-tiers {{ display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--ink-muted); margin: 10px 0; }}
+      .legend-tier-row {{ line-height: 1.5; }}
+      .legend-plain {{ color: var(--ink-muted); margin-left: 2px; }}
+      .legend-table {{ width: 100%; border-collapse: collapse; margin-top: 4px; }}
+      .legend-table td {{ border: none; padding: 3px 8px 3px 0; font-size: 12px; color: var(--ink-muted); vertical-align: middle; }}
+      .legend-table td:first-child {{ white-space: nowrap; width: 1%; }}
+      .legend-note {{ font-size: 11.5px; color: var(--ink-muted); margin: 8px 0 0; font-style: italic; }}
+    
+      .tier {{
+        border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
+        margin-bottom: 16px; background: #fff;
+      }}
+      table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
+      th, td {{ border-bottom: 1px solid var(--border); padding: 8px 10px; font-size: 13px; text-align: left; }}
+      th {{ background: var(--panel); font-weight: 600; color: var(--ink-muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }}
+      tbody tr:nth-child(even) {{ background: #fbfcfd; }}
+      td.score {{ text-align: center; font-weight: 700; width: 60px; }}
+    
+      .tier-high {{ border-left: 4px solid var(--high); }}
+      .tier-high h2 {{ color: var(--high); }}
+      .tier-high td.score {{ color: var(--high); }}
+      .tier-medium {{ border-left: 4px solid var(--medium); }}
+      .tier-medium h2 {{ color: var(--medium); }}
+      .tier-medium td.score {{ color: var(--medium); }}
+      .tier-low {{ border-left: 4px solid var(--low); }}
+      .tier-low h2 {{ color: var(--low); }}
+      .tier-low td.score {{ color: var(--low); }}
+      .tier-household {{ border-left: 4px solid var(--household); background: #f4faf9; }}
+      .tier-household h2 {{ color: var(--household); }}
+      .tier-household td.score {{ color: var(--household); }}
+    
+      .tier-chip {{ color: #fff; font-weight: 600; }}
+      .tier-chip-high {{ background: var(--high); }}
+      .tier-chip-medium {{ background: var(--medium); }}
+      .tier-chip-household {{ background: var(--household); }}
+    
+      .badge {{ display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; margin-right: 5px; margin-bottom: 2px; white-space: nowrap; }}
+      .badge-email {{ background: var(--email); color: #fff; }}
+      .badge-email-similar {{ background: var(--email-bg); color: var(--email); border: 1px solid var(--email); }}
+      .badge-phone {{ background: var(--phone); color: #fff; }}
+      .badge-phone-similar {{ background: var(--phone-bg); color: var(--phone); border: 1px solid var(--phone); }}
+      .badge-dob {{ background: var(--dob); color: #fff; }}
+      .badge-dob-similar {{ background: var(--dob-bg); color: var(--dob); border: 1px solid var(--dob); }}
+      .badge-family {{ background: var(--family); color: #fff; }}
+      .badge-muted {{ background: var(--family-bg); color: var(--ink-muted); border: 1px dashed #b7bfc8; font-weight: 500; }}
+    </style>
+    </head>
+    <body>
+    <h1>Possible Duplicate People</h1>
+    <p class="meta">
+      Fuzzy-matches recently created People records against the People table to catch nickname/typo
+      duplicates TouchPoint's native Duplicates finder misses. Pairs already tracked there are excluded.
+      Read-only &mdash; merge records using TouchPoint's own Admin merge tool, not here.
+    </p>
+    
+    <div class="stat-row">
+      <div class="stat-tile"><div class="stat-label">Recently created</div><div class="stat-value" id="stat-recent">&hellip;</div></div>
+      <div class="stat-tile stat-high"><div class="stat-label">High confidence</div><div class="stat-value" id="stat-high">&mdash;</div></div>
+      <div class="stat-tile stat-medium"><div class="stat-label">Medium confidence</div><div class="stat-value" id="stat-medium">&mdash;</div></div>
+      <div class="stat-tile stat-household"><div class="stat-label">Household link gaps</div><div class="stat-value" id="stat-household">&mdash;</div></div>
+    </div>
+    
+    <div class="control-bar">
+      <label for="days-input">Lookback (days, for Full scan):</label>
+      <input type="number" id="days-input" min="1" value="{initial_days}">
+      <button class="btn btn-secondary" id="btn-quick" onclick="runScan('quick')">Quick scan (last {quick_days} days)</button>
+      <button class="btn" id="btn-full" onclick="runScan('full')">Full scan</button>
+      <span class="scan-status" id="scan-status"></span>
+    </div>
+    
+    <div class="error-banner" id="error-banner"></div>
+    
+    {legend}
+    
+    <div id="results"><p class="empty">Click Quick scan or Full scan to check for likely duplicates.</p></div>
+    
+    <script>
+    (function() {{
+        var scriptPath = (function() {{
+            var p = window.location.pathname;
+            if (p.indexOf('/PyScriptForm/') > -1) return p;
+            return p.replace('/PyScript/', '/PyScriptForm/');
+        }})();
+    
+        function extractJson(text) {{
+            text = (text || '').trim();
+            var start = text.indexOf('{{');
+            var end = text.lastIndexOf('}}');
+            if (start >= 0 && end > start) {{
+                return text.substring(start, end + 1);
+            }}
+            return text;
+        }}
+    
+        function ajax(action, params, callback) {{
+            var data = 'action=' + encodeURIComponent(action);
+            if (params) {{
+                for (var key in params) {{
+                    if (params.hasOwnProperty(key)) {{
+                        data += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
+                    }}
+                }}
+            }}
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', scriptPath, true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.onreadystatechange = function() {{
+                if (xhr.readyState === 4) {{
+                    if (xhr.status === 200) {{
+                        try {{
+                            callback(null, JSON.parse(extractJson(xhr.responseText)));
+                        }} catch (e) {{
+                            callback('Invalid response: ' + e.message, null);
+                        }}
+                    }} else {{
+                        callback('HTTP ' + xhr.status, null);
+                    }}
+                }}
+            }};
+            xhr.send(data);
+        }}
+    
+        function showError(msg) {{
+            var el = document.getElementById('error-banner');
+            el.textContent = msg;
+            el.style.display = 'block';
+        }}
+    
+        function clearError() {{
+            document.getElementById('error-banner').style.display = 'none';
+        }}
+    
+        function setScanning(isScanning, label) {{
+            document.getElementById('btn-quick').disabled = isScanning;
+            document.getElementById('btn-full').disabled = isScanning;
+            var status = document.getElementById('scan-status');
+            status.innerHTML = isScanning ? '<span class="spinner"></span>' + label : '';
+        }}
+    
+        function updateStats(data) {{
+            document.getElementById('stat-recent').textContent = data.recent_count;
+            document.getElementById('stat-high').textContent = data.high;
+            document.getElementById('stat-medium').textContent = data.medium;
+            document.getElementById('stat-household').textContent = data.household_gap_count;
+        }}
+    
+        window.runScan = function(mode) {{
+            clearError();
+            setScanning(true, mode === 'quick'
+                ? 'Running quick scan (last {quick_days} days)\\u2026'
+                : 'Running full scan\\u2026 this can take a while for a large lookback window.');
+            var days = document.getElementById('days-input').value;
+            ajax('scan', {{mode: mode, days: days}}, function(err, data) {{
+                setScanning(false, '');
+                if (err || !data || !data.success) {{
+                    showError((data && data.message) || err || 'Scan failed.');
+                    return;
+                }}
+                document.getElementById('results').innerHTML = data.sections_html;
+                updateStats(data);
+            }});
+        }};
+    
+        // Fast stat tile on load: cheap COUNT(*), independent of the scan buttons.
+        ajax('count', {{days: document.getElementById('days-input').value}}, function(err, data) {{
+            if (!err && data && data.success) {{
+                document.getElementById('stat-recent').textContent = data.recent_count;
+            }} else {{
+                document.getElementById('stat-recent').textContent = '?';
+            }}
+        }});
+    }})();
+    </script>
+    </body>
+    </html>""".format(
+                initial_days=initial_days,
+                quick_days=QUICK_SCAN_DAYS,
+                legend=build_legend_html(),
+            )
+        )
 
-  .tier {{
-    border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
-    margin-bottom: 16px; background: #fff;
-  }}
-  table {{ border-collapse: collapse; width: 100%; margin-top: 10px; }}
-  th, td {{ border-bottom: 1px solid var(--border); padding: 8px 10px; font-size: 13px; text-align: left; }}
-  th {{ background: var(--panel); font-weight: 600; color: var(--ink-muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }}
-  tbody tr:nth-child(even) {{ background: #fbfcfd; }}
-  td.score {{ text-align: center; font-weight: 700; width: 60px; }}
 
-  .tier-high {{ border-left: 4px solid var(--high); }}
-  .tier-high h2 {{ color: var(--high); }}
-  .tier-high td.score {{ color: var(--high); }}
-  .tier-medium {{ border-left: 4px solid var(--medium); }}
-  .tier-medium h2 {{ color: var(--medium); }}
-  .tier-medium td.score {{ color: var(--medium); }}
-  .tier-low {{ border-left: 4px solid var(--low); }}
-  .tier-low h2 {{ color: var(--low); }}
-  .tier-low td.score {{ color: var(--low); }}
-  .tier-household {{ border-left: 4px solid var(--household); background: #f4faf9; }}
-  .tier-household h2 {{ color: var(--household); }}
-  .tier-household td.score {{ color: var(--household); }}
-
-  .tier-chip {{ color: #fff; font-weight: 600; }}
-  .tier-chip-high {{ background: var(--high); }}
-  .tier-chip-medium {{ background: var(--medium); }}
-  .tier-chip-household {{ background: var(--household); }}
-
-  .badge {{ display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; margin-right: 5px; margin-bottom: 2px; white-space: nowrap; }}
-  .badge-email {{ background: var(--email); color: #fff; }}
-  .badge-email-similar {{ background: var(--email-bg); color: var(--email); border: 1px solid var(--email); }}
-  .badge-phone {{ background: var(--phone); color: #fff; }}
-  .badge-phone-similar {{ background: var(--phone-bg); color: var(--phone); border: 1px solid var(--phone); }}
-  .badge-dob {{ background: var(--dob); color: #fff; }}
-  .badge-dob-similar {{ background: var(--dob-bg); color: var(--dob); border: 1px solid var(--dob); }}
-  .badge-family {{ background: var(--family); color: #fff; }}
-  .badge-muted {{ background: var(--family-bg); color: var(--ink-muted); border: 1px dashed #b7bfc8; font-weight: 500; }}
-</style>
-</head>
-<body>
-<h1>Possible Duplicate People</h1>
-<p class="meta">
-  People created in the last <strong>{days}</strong> day(s) ({recent_count} found, capped at {max_recent}),
-  fuzzy-matched against the People table. Pairs already tracked in TouchPoint's native
-  Duplicates list are excluded. Up to {max_per_person} match(es) shown per person, highest score first.
-  This is a read-only review aid &mdash; merge records using TouchPoint's own Admin merge tool, not here.
-  Add <code>?Days=NN</code> to the URL to change the lookback window.
-</p>
-{legend}
-{sections}
-</body>
-</html>""".format(
-        legend=legend_html,
-        days=lookback_days,
-        recent_count=len(recent_rows),
-        max_recent=MAX_RECENT_ROWS,
-        max_per_person=MAX_CANDIDATES_PER_PERSON,
-        sections=sections_html,
+# ============================================================
+# Entry point -- wrapped so a failure ANYWHERE above (not just inside the
+# per-action try/except blocks in the POST handlers) prints a visible
+# Python error instead of leaving the page blank with nothing to debug
+# from. Added 2026-09-01 after a live test showed a blank page with no
+# error surfaced.
+# ============================================================
+try:
+    main()
+except Exception:
+    import traceback
+    print(
+        "<!DOCTYPE html><html><body>"
+        "<h1>TP_DuplicatePersonFinder error</h1>"
+        "<pre>" + esc(traceback.format_exc()) + "</pre>"
+        "</body></html>"
     )
-)
+

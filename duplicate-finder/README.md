@@ -88,15 +88,26 @@ Not very. Unlike most of this repo (attendance dashboards, roster reports), this
 
 (This script was renamed 2026-08-27 from an `RPC_`-prefixed name, this repo's convention for RockPointe-specific deployed scripts, to the generic `TP_` prefix, since it has no RockPointe-specific facts baked in.)
 
+## Architecture — GET shell + AJAX scan (2026-09-01)
+
+The original version ran the entire pipeline (SQL blocking query, Python fuzzy scoring, HTML render) synchronously on one GET request — with a 120-day/500-row window that's slow enough that the browser sat on a blank tab for the whole run. Restructured as a single-file mini-app, the same pattern as this repo's `roll-sheet-report/TPxi_RollSheet.py`:
+
+- **GET** renders an HTML shell instantly — header, legend, a lookback-days input, Quick/Full scan buttons, empty stat tiles and results area. No heavy query runs here.
+- A cheap `COUNT(*)` fires via AJAX on page load to fill in the "recently created" stat tile fast, independent of the expensive fuzzy-match pass.
+- **Quick scan** (last 30 days, capped at 150 rows) and **Full scan** (the configured lookback/500-row cap, or the Days field's value) POST to the same script and run the real pipeline server-side, returning JSON (counts + a pre-rendered HTML fragment) that JS injects into the page without a reload.
+
+The scoring/blocking logic itself is unchanged — see "How it works" above. Only the driver changed shape, from "always print the full page" to "print a shell on GET, print JSON on POST."
+
 ## Deploy
 
-`Admin > Advanced > Special Content > Python Scripts > +New`, script name `TP_DuplicatePersonFinder`, paste in `TP_DuplicatePersonFinder.py`. Access via `/PyScript/TP_DuplicatePersonFinder` or the Special Content admin "run" preview — this report takes no form input, so either works. No email is sent; nothing is written.
+`Admin > Advanced > Special Content > Python Scripts > +New`, script name `TP_DuplicatePersonFinder`, paste in `TP_DuplicatePersonFinder.py`. Access via `/PyScriptForm/TP_DuplicatePersonFinder` (the shell auto-redirects there from `/PyScript/` if visited directly, since AJAX POSTs need the Form path — same reason `TPxi_RollSheet.py` does this). No email is sent; nothing is written.
 
 ## Live validation status
 
-Live-tested against RockPointe's TouchPoint instance 2026-08-26/27, judged a clear improvement by the admin who requested it. The default 120-day window (500 recent People, capped) completes without timing out and correctly surfaces nickname matches, fat-fingered last names, case-formatting duplicates, and pairs caught mainly through email+phone+DOB triangulation despite a weak name match — while excluding same-household family members and routing not-yet-linked household pairs (e.g. siblings) into their own section instead of the duplicate list.
+The original synchronous version was live-tested against RockPointe's TouchPoint instance 2026-08-26/27, judged a clear improvement by the admin who requested it. The default 120-day window (500 recent People, capped) completed without timing out and correctly surfaced nickname matches, fat-fingered last names, case-formatting duplicates, and pairs caught mainly through email+phone+DOB triangulation despite a weak name match — while excluding same-household family members and routing not-yet-linked household pairs (e.g. siblings) into their own section instead of the duplicate list.
 
-Still open:
+The GET-shell/AJAX-scan restructure (above) has been verified locally against a mocked TouchPoint runtime (GET renders instantly with no query calls; `count`, Quick scan, and Full scan POST actions all return correct JSON; nickname/household scoring behavior unchanged) but **not yet exercised against RPC's live instance**. Still open:
+- [ ] Confirm the shell loads instantly and both Quick/Full scan buttons return real results against live RPC data.
 - [ ] Confirm `lookup.Origin` values and set `ORIGIN_FILTER_IDS` for registration-only scoping.
 - [ ] Get the ministries who originally flagged this problem to sanity-check a run's output.
 
