@@ -17,6 +17,7 @@ For the full TouchPoint execution model, dev workflow, condensed schema guardrai
 | What | Path |
 |------|------|
 | Schema reference (authoritative) | `DB_REFERENCE.md` |
+| RPC Style Guide (writing + ministry brand, not in repo) | `/Users/praxen/RockPointe Dev/StyleGuideBooklet_4_26.pdf` — condensed in `/rockpointe-dev` |
 | Deeper dev reference / workflow | `/rockpointe-dev` command (`.claude/commands/rockpointe-dev.md`) |
 | Attendance dashboards + email reports | `attendance-dashboard/` |
 | Schema-discovery tooling | `data-dictionary-expander/` |
