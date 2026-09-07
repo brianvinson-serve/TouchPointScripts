@@ -1,6 +1,8 @@
 # Ministry Attendance Roster Report
 
-Printable Leader/Member roster + weekly attendance grid for one or more active involvements in **any RPC ministry** — a three-step live picker (Ministry → Division → Involvement(s)) replaces the original config list, so a new ministry, division, or involvement shows up automatically with no code change. Two roster columns, the grouping/page-break behavior, and an optional attendance start date are configurable per print run.
+Printable Leader/Member roster + weekly attendance grid for one or more active involvements in **any RPC ministry** — a three-step live picker (Ministry → Division → Involvement(s)) replaces the original config list, so a new ministry, division, or involvement shows up automatically with no code change. Two roster columns, the sort order, the grouping/page-break behavior, and an optional attendance start date are configurable per print run.
+
+Involvement **sub-groups** (TouchPoint's SubGroups feature) can be used as a column, a sort order, or a page break — offered only when the involvement(s) you picked actually have any. See "Sub-groups" below.
 
 ## History
 
@@ -12,7 +14,7 @@ Originally `AD_ReNewRosterReport.py`, built for Adult Discipleship's ReNew minis
 
 1. **No `ProgId`** — pick a ministry (`dbo.Program`).
 2. **`ProgId` set, no `DivId`** — pick a division within that ministry (`dbo.Division`).
-3. **`ProgId`+`DivId` set, no valid `OrgIds`** — check one or more active (`OrganizationStatusId = 30`) involvements in that division (with member counts), plus pick the two configurable columns, the grouping mode, and an optional attendance start date.
+3. **`ProgId`+`DivId` set, no valid `OrgIds`** — check one or more active (`OrganizationStatusId = 30`) involvements in that division (with member and sub-group counts, and a search box to narrow a long list), plus pick the two configurable columns, the sort order, the grouping mode, and an optional attendance start date.
 4. **A valid `OrgIds` present** — the combined roster for the checked involvement(s), with the chosen columns/grouping.
 
 A stale or invalid id/option at any stage falls back to re-rendering that stage (e.g. a bookmarked URL for a division that no longer exists just reopens the division picker) rather than erroring. Each stage has a "Back" link to the previous one; the roster's back link intentionally omits `OrgIds` (so it lands on the checkbox picker, not a re-render of the same roster) but preserves the column/grouping choices.
@@ -42,6 +44,7 @@ The two rightmost columns (after Total) are chosen from a dropdown at stage 3, i
 | Marital Status | `lookup.MaritalStatus.Description`/`Code` |
 | Last Name | `People.LastName` (an approximation for "who's in the same family" — there's no confirmed household/family-name field, see below) |
 | Involvement (class/org name) | Which selected org/class this row belongs to — mainly useful when multiple involvements are combined |
+| Sub-Group | The member's sub-group(s) on that involvement, comma-joined if they're in more than one. Only selectable when the picked involvement(s) have sub-groups — see below |
 
 Grade/Marital Status (Phone/Email/Involvement were already part of the original build) are **not yet RPC-confirmed** — they assume standard TouchPoint/BVCMS field names that haven't been specifically verified live the way Program/Division/DivOrg/MemberType have been elsewhere in this repo. If any throws `Invalid column name`, fix it here and fold the correction back into `DB_REFERENCE.md`.
 
@@ -65,11 +68,64 @@ Round-trips through the URL the same way as the column/grouping choices (`&Since
 
 A checkbox next to the date field, unchecked by default, drops anyone whose attendance count (within the "Attendance since" range, if set) is zero — e.g. a printed roster of only students who actually showed up this school year, rather than the full class list including no-shows. Round-trips as `&ExcludeZero=1`. Applied after Total is computed but before grouping, so section counts/headers and the page's total-member count all reflect the trimmed list.
 
+## Living inside TouchPoint's page (CSS isolation)
+
+This script's HTML is injected into a TouchPoint page that brings its own Bootstrap-derived stylesheet, so **generic class names are a live collision risk.** Confirmed on the first live run (2026-09-07): the branded header rendered short with its "RockPointe Church" eyebrow missing entirely, because TouchPoint's CSS defines rules on names this page also used.
+
+Two defenses, both required — neither is sufficient alone:
+
+1. **Every class is prefixed `rr-`** (`rr-bar`, `rr-card`, `rr-status`, …). Prefixing is what actually prevents collisions. Specificity does *not* help when the host declares a property this page never declares (a host `.church { display: none }` wins by default, because there's nothing to override), nor when the host uses `!important`.
+2. **Every rule is scoped under `#rpcAttendanceRoster`** at render time by `scope_css()`, and the page content is wrapped in that element. This protects the bare *element* selectors that can't be prefixed — `h1`, `button`, `select`, `legend`, `th`, `td` — which TouchPoint definitely styles. `body` rules are retargeted at the wrapper, so this page no longer tries to restyle TouchPoint's own `<body>`. `@page` is passed through unprefixed, since it takes no selector.
+
+`scope_css()` lets the CSS constants stay readable (write `.rr-card { … }`, not `#rpcAttendanceRoster .rr-card { … }`) with the scoping applied at print time. The test suite renders every screen against a deliberately hostile stylesheet — `.church{display:none}`, `.bar{padding:0 !important}`, `.orglist{max-height:none !important}` — and asserts the page still comes out right. **If you add a class, prefix it; if you add a rule, let `scope_css()` handle it.**
+
+## Searching a long involvement list
+
+Divisions like `AD Classes/Meetings/Groups` carry dozens of active involvements — **156 of them, confirmed live 2026-09-07** — so the checkbox list has a **search box** that filters it by name as you type (case-insensitive substring, with a clear button and a "No involvements match that search" state).
+
+**A search only hides rows — it never unchecks one.** Anything already checked stays selected, still counts toward sub-group availability, and still ends up on the roster. The line under the list keeps that honest: `Showing 4 of 34 · 2 selected · 1 of them hidden by the search (still included)`. It stays empty until there's something to report.
+
+Two implementation notes worth keeping if this gets touched:
+- Filtering toggles a `.hide { display: none !important; }` class rather than the `hidden` attribute, because `.orgcb { display: block }` would otherwise win over the browser's default `[hidden]` rule and the "hidden" rows would stay visible.
+- Enter inside the search box is suppressed, so typing a search and hitting Enter doesn't submit the form with whatever happens to be checked.
+
+## Sub-groups
+
+TouchPoint's involvement-level **SubGroups** feature (`dbo.MemberTags` = the sub-groups defined on an involvement, `dbo.OrgMemMemTags` = who's in them) is surfaced in three independent places, all on stage 3:
+
+- **As a column** — "Sub-Group" in either configurable column dropdown.
+- **As a sort** — "Sort members by → Sub-Group" (see below).
+- **As a page break** — "Group roster by → Sub-Group", one printed page per sub-group.
+
+**Only offered when the checked involvement(s) actually have sub-groups.** Stage 3 loads a per-involvement sub-group count for every active org in the division and hands it to the browser as a small JS map; as boxes are ticked, the three Sub-Group choices enable or disable live and a status line says why ("2 sub-groups found in your selection…" / "The involvement(s) you checked have no sub-groups…"). Options are **disabled and relabelled, never hidden**, so nothing appears and vanishes as the selection changes; if a Sub-Group choice was already made and then becomes unavailable, it resets to the default and the status line says so.
+
+That's a convenience layer only — `valid_group_by()`/`valid_sort_by()` plus a server-side stage-4 fallback still backstop it, so a hand-edited URL, a stale bookmark, or a browser with JS off gets a sane roster (falling back to the default grouping/sort, with a note in the roster's meta line) instead of an error.
+
+**A member can be in more than one sub-group of the same involvement.** That shapes each use differently:
+- *Column* — their sub-groups are comma-joined into one cell ("Table 1, Table 2").
+- *Page break* — they are printed **once under each** of their sub-groups, so a page handed to a sub-group's leader is complete. Section counts can therefore sum to more than the roster's total member count; the meta line says so.
+- *Sort* — they sort by their comma-joined label.
+
+Members with no sub-group collect into a final **"(No sub-group)"** section, always printed last.
+
+**Sub-group names are only unique within an involvement** (`MemberTags.OrgId`), so when several involvements are combined, sub-group section headings are prefixed with the involvement name — otherwise two unrelated groups both called "Table 1" would merge onto one page. With a single involvement selected the labels stay unprefixed.
+
+**Implementation note:** this deliberately does *not* use the `STUFF(... FOR XML PATH(''))` string-concat that `roll-sheet-report/TPxi_RollSheet.py` uses for the same data. `FOR XML PATH` XML-escapes the tag name, so a sub-group called `Men & Women` comes back as `Men &amp; Women` and gets double-escaped by `esc()` on render. The names are fetched as rows and joined in Python instead — which grouping needs anyway.
+
+## Sort order
+
+A stage-3 "Sort members by" dropdown:
+- **Default** — the original behavior, unchanged: Involvement, then Leaders before Members, then name (applied by `sql_roster`'s `ORDER BY`).
+- **Sub-Group** — re-sorts in Python by the sub-group label, with the default order kept as the tiebreak (Python's sort is stable), so members inside one sub-group still read Leaders-first and alphabetically. Members with no sub-group sort last.
+
+Sorting is independent of grouping: with gender grouping still on, a sub-group sort applies *within* the Men and Women sections rather than replacing them.
+
 ## Grouping / page breaks
 
-A third stage-3 dropdown ("Group roster by") replaces the original gender-only toggle with three choices:
+A stage-3 dropdown ("Group roster by") replaces the original gender-only toggle with four choices:
 - **Gender** (default, matches the original behavior) — Men / Women / Unspecified Gender sections, page break between each.
 - **Involvement** — one section per selected class/org (e.g. one printed page per Women's Ministry table), page break between each. Only meaningful with multiple involvements selected; with one, it's just a single section named after that org.
+- **Sub-Group** — one section per sub-group, page break between each; see "Sub-groups" above for the multi-sub-group and name-collision behavior.
 - **No grouping** — one flat list, no section headings, no page breaks.
 
 ## Row-level security
@@ -90,7 +146,14 @@ If a future ministry needs something structurally different (e.g. split by campu
 
 ## Saving a specific roster's settings
 
-Everything (Program, Division, selected involvements, columns, grouping) lives in the URL query string, so bookmarking the generated roster's URL "saves" that exact configuration to rerun later — no extra feature needed. A true named/saved-config system (like Roll Sheet's, persisted via `model.WriteContentText`) hasn't been built; consider it only if bookmarking proves insufficient in practice.
+Everything (Program, Division, selected involvements, columns, sort, grouping) lives in the URL query string, so bookmarking the generated roster's URL "saves" that exact configuration to rerun later — no extra feature needed. A true named/saved-config system (like Roll Sheet's, persisted via `model.WriteContentText`) hasn't been built; consider it only if bookmarking proves insufficient in practice.
+
+**Bookmarked URLs from earlier versions keep working, and this is enforced by tests.** Staff have bookmarked URLs against several iterations of this report, so backward compatibility is a hard requirement, not a nice-to-have. Two properties protect it:
+
+- New option values are **appended** to `FIELD_OPTIONS`/`GROUP_BY_OPTIONS` and matched **by name, not position**, so adding `subgroup` can't shift the meaning of an existing `Col1=age` or `GroupBy=involvement`.
+- The new `SortBy` parameter is **optional** — absent from every pre-existing bookmark, and `valid_sort_by("")` returns the original default order.
+
+`test_rpc_attendance_roster.py` replays every query-string shape an existing bookmark could hold against both the pre-sub-group baseline (git `d15f4ae`) and the current script, and asserts the rendered roster rows and section headings are identical. Keep those tests passing when changing option lists or parameter names.
 
 ## Confirmed for ReNew Fall 2026 (from the original AD-only build)
 
@@ -101,6 +164,28 @@ Everything (Program, Division, selected involvements, columns, grouping) lives i
 - `lookup.MemberType`: 140 = Leader, 220 = Member (the only two shown on the roster).
 
 See `DB_REFERENCE.md` for the full write-up (Program 1119 addition, `Meetings.Canceled`/`Meetings.DidNotMeet` filter, ReNew org family discovered via name search, and the `OrganizationStructure`/`EXCLUDED_PROGRAM_IDS` discovery).
+
+## Styling
+
+The three builder screens (Ministry → Division → Involvement + options) use the **main RockPointe Church brand** — Navy `#0C2340` header with a Sunshine Yellow `#FFD242` rule, Curious Blue `#1D6A94` links, Space Blue `#183D5F` on hover, Light Gray `#D1D3D4` borders — plus a "1. Ministry › 2. Division › 3. Involvement + options" step indicator so it's clear where you are in the flow. Main brand rather than an Adult Discipleship or ministry sheet, per Comms: this is a church-wide staff tool, not a ministry-audience artifact.
+
+The stage-3 card's two groups are labelled **"Involvements"** and **"Print options"** — deliberately *not* "Step 1/Step 2", which collided with the "3. Involvement + options" breadcrumb above and made the page look like it had two different step counters. If those legends get renamed again, check the sub-group status-line copy, which refers to "Print options below" by name.
+
+Brand fonts (Bebas / Montserrat / HelveticaNeue) are declared as closest-safe stacks with no webfont `<link>` — TouchPoint-hosted pages can't load webfonts reliably, so the hex values carry the brand. `BUILDER_CSS`/`ROSTER_CSS` are module-level constants passed into the page templates as `.format()` arguments rather than living inside them, so their CSS braces don't have to be doubled.
+
+The **roster itself (stage 4) stays deliberately print-first**: white background, brand color used for the heading, the yellow rule under it, and table-header text, but no filled backgrounds — it's a landscape sheet printed one page per section, and flooding it with navy would burn toner for no benefit.
+
+Each grouped section renders as its own `<table>`, which browsers size independently — so the first three columns carry explicit `width` suggestions to keep sections lined up page-to-page. They're suggestions, not caps: a long name still widens its column.
+
+## Tests
+
+`test_rpc_attendance_roster.py` — offline, no live TouchPoint or DB access, fabricated (non-PII) fixture data:
+
+```
+python3 attendance-roster-report/test_rpc_attendance_roster.py
+```
+
+It mocks `q`/`model`, `exec`s the real script end-to-end, and captures the printed HTML. Coverage: bookmark compatibility against the `d15f4ae` baseline (see above), sub-group column/sort/grouping behavior, multi-sub-group members appearing under each section, cross-involvement sub-group name collisions, the no-sub-groups fallbacks, all three builder screens, and the row-level-security paths. Exits non-zero on failure.
 
 ## Deploy
 
@@ -115,6 +200,21 @@ Round 3 (2026-08-30): generalized to the three-stage live Program/Division/Invol
 Round 4 (same day): configurable columns (incl. "Leave Blank"), a unified Gender/Involvement/None grouping dropdown, multi-involvement selection via checkboxes, and row-level security via `model.UserPeopleId`.
 
 Round 5 (2026-08-31): optional "Attendance since" date filter and "Exclude zero-attendance members" checkbox (see above), requested for Student Ministry involvements with several school years of history under one class/org.
+
+Round 6a (2026-09-07, after a live pass): Debbie confirmed the sub-group work reads correctly against real data. Reviewing the deployed page in a browser then surfaced four things:
+
+- **CSS collisions with TouchPoint's own stylesheet** — the branded header rendered short with its eyebrow line missing. Fixed by prefixing every class and scoping every rule (see "Living inside TouchPoint's page" above). This was invisible in local rendering, which has no host stylesheet.
+- **156 active involvements** in Division 31, not the couple of dozen assumed — so a **search box** on the involvement list (see above) is essential rather than a nicety.
+- The **"Step 1 / Step 2"** legends collided with the "3. Involvement + options" breadcrumb, making the page look like it had two step counters; renamed to "Involvements" / "Print options".
+- Grouped roster sections each render as their own table and so didn't line up column-for-column; the leading columns now carry width hints.
+
+Round 6 (2026-09-07): **sub-group support** — as a column, a sort order, and a page-break grouping, offered only when the selected involvement(s) have sub-groups (see "Sub-groups" above). Requested by Debbie Avinger (Adult Discipleship) after discovering she could create sub-groups inside her involvement. Same round: the builder screens restyled to the main RPC brand with a step indicator, and `test_rpc_attendance_roster.py` added — including the bookmark-compatibility suite, since staff have bookmarked URLs from several earlier iterations.
+
+**Still needs a live pass for the sub-group work specifically:**
+
+- That `dbo.MemberTags` / `dbo.OrgMemMemTags` return what TouchPoint's involvement UI shows as "SubGroups" for a real RPC involvement — the tables and their scale are confirmed in `DB_REFERENCE.md`, but this report's specific joins have not been run live.
+- Whether RPC involvements carry `MemberTags` rows created for **other** purposes (`DB_REFERENCE.md` notes RPC's existing usage skews toward event-RSVP options and volunteer-scheduling slots, which share this table). If those show up as noise in the picker's sub-group counts, this may need a filter — currently every `MemberTags` row on an involvement counts as a sub-group.
+- The sub-group count query joins `dbo.Organizations` and `dbo.DivOrg` for every active org in a division; fine at RPC's scale by inspection, not timed live.
 
 **First live run (2026-08-30) found a real bug**: the Address column threw `Invalid column name 'City'`/`'State'` — `People.City`/`People.State` don't exist on RPC's schema. Removed (see "Configurable columns" above for the discovery query to run before re-adding it). Everything else in that same run was not reported as broken.
 

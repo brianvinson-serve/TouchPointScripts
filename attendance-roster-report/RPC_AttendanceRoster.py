@@ -159,6 +159,7 @@ FIELD_OPTIONS = [
     ("maritalstatus", "Marital Status"),
     ("lastname", "Last Name"),
     ("involvement", "Involvement (class/org name)"),
+    ("subgroup", "Sub-Group"),
 ]
 FIELD_KEYS = [k for k, _ in FIELD_OPTIONS]
 FIELD_LABELS = dict(FIELD_OPTIONS)
@@ -169,10 +170,40 @@ DEFAULT_COL2 = "email"
 GROUP_BY_OPTIONS = [
     ("gender", "Gender (Men / Women sections)"),
     ("involvement", "Involvement (one section per selected class/org)"),
+    ("subgroup", "Sub-Group (one section per sub-group)"),
     ("none", "No grouping -- one combined list"),
 ]
 GROUP_BY_KEYS = [k for k, _ in GROUP_BY_OPTIONS]
 DEFAULT_GROUP_BY = "gender"
+
+# Roster sort order. "default" is the original behavior (already applied by
+# sql_roster's ORDER BY: Involvement, then Leader-before-Member, then name).
+# "subgroup" re-sorts in Python by sub-group label, keeping that original
+# ordering as the tiebreak (Python's sort is stable), so a sub-group's
+# members still read Leaders-first and alphabetically within the group.
+SORT_BY_OPTIONS = [
+    ("default", "Default (Leaders first, then name)"),
+    ("subgroup", "Sub-Group, then the default order"),
+]
+SORT_BY_KEYS = [k for k, _ in SORT_BY_OPTIONS]
+DEFAULT_SORT_BY = "default"
+
+# TouchPoint's involvement-level "SubGroups" feature is dbo.MemberTags
+# (one row per sub-group defined on an involvement) + dbo.OrgMemMemTags
+# (composite PK OrgId+PeopleId+MemberTagId, linking a member to one or more
+# of them) -- confirmed at RPC in DB_REFERENCE.md, ~7,064 / ~50,601 rows,
+# so this is a well-used feature here, not a speculative join.
+#
+# A person can hold MORE THAN ONE sub-group in the same involvement. That
+# shapes three behaviors below:
+#   - as a column, their sub-groups are comma-joined into one cell;
+#   - as a page-break grouping, they are printed once under EACH of their
+#     sub-groups (so a per-sub-group printout handed to a table leader is
+#     complete), which means section counts can sum to more than the
+#     roster's total member count;
+#   - as a sort, they sort by their comma-joined label.
+# Members with no sub-group collect into a final section, always last.
+NO_SUBGROUP_LABEL = "(No sub-group)"
 
 # Optional attendance-grid start date (stage 3's "Attendance since" date
 # input, YYYY-MM-DD -- the format an HTML5 <input type="date"> submits).
@@ -184,6 +215,203 @@ DEFAULT_GROUP_BY = "gender"
 # unlike every other query input here it isn't an int or a value drawn from
 # a fixed option list.
 DEFAULT_SINCE_DATE = ""
+
+# ============================================================
+# RPC brand styling
+# ============================================================
+# Main RockPointe Church palette (the default per Comms -- ministry-specific
+# sheets are only for artifacts branded to that ministry's audience, which a
+# church-wide staff tool is not):
+#   Navy #0C2340 (primary)   Sunshine Yellow #FFD242 (accent)
+#   Space Blue #183D5F       Curious Blue #1D6A94
+#   Steel Blue #4580B9       Baby Blue #76C2E3       Light Gray #D1D3D4
+# Brand fonts are Bebas (titles) / Montserrat (subtitles) / HelveticaNeue
+# (body). TouchPoint-hosted pages can't load webfonts reliably, so these are
+# closest-safe stacks and the hex values carry the brand.
+NAVY = "#0C2340"
+YELLOW = "#FFD242"
+SPACE_BLUE = "#183D5F"
+CURIOUS_BLUE = "#1D6A94"
+LIGHT_GRAY = "#D1D3D4"
+
+TITLE_FONT = '"Bebas Neue", Impact, "Arial Narrow", Haettenschweiler, sans-serif'
+SUBTITLE_FONT = 'Montserrat, "Segoe UI", Tahoma, sans-serif'
+BODY_FONT = '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif'
+
+# Used by the interactive builder screens (stages 1-3). Passed into the page
+# templates as a .format() argument rather than living inside them, so its
+# braces don't need doubling.
+BUILDER_CSS = """
+  *, *::before, *::after { box-sizing: border-box; }
+  body { font-family: %(body)s; margin: 0; padding: 0 0 40px; color: #222;
+         background: #f7f9fb; -webkit-font-smoothing: antialiased; }
+  .rr-bar { background: %(navy)s; border-bottom: 4px solid %(yellow)s;
+         padding: 26px 24px 22px; margin: 12px 0 0; overflow: visible; }
+  .rr-bar .rr-church { font-family: %(subtitle)s; font-size: 11px; letter-spacing: 0.14em;
+                 text-transform: uppercase; color: %(yellow)s; margin: 0 0 6px; font-weight: 600;
+                 line-height: 1; }
+  .rr-bar h1 { font-family: %(title)s; font-size: 30px; line-height: 1.15; letter-spacing: 0.03em;
+            color: #fff; margin: 0; padding: 0; font-weight: normal; text-transform: uppercase; }
+  .rr-wrap { max-width: 720px; margin: 0 auto; padding: 22px 24px 0; }
+  .rr-steps { font-family: %(subtitle)s; font-size: 11px; letter-spacing: 0.10em;
+           text-transform: uppercase; color: %(curious)s; font-weight: 600; margin: 0 0 14px; }
+  .rr-steps .rr-on { color: %(navy)s; }
+  .rr-steps .rr-sep { color: %(gray)s; padding: 0 6px; }
+  .rr-meta { color: #55606b; font-size: 13px; margin: 0 0 18px; line-height: 1.5; }
+  .rr-back { margin: 0 0 14px; font-size: 13px; }
+  a { color: %(curious)s; }
+  a:hover { color: %(navy)s; }
+  .rr-card { background: #fff; border: 1px solid #e3e8ee; border-radius: 6px;
+          padding: 22px 24px 14px; margin-bottom: 18px; box-shadow: 0 1px 2px rgba(12,35,64,0.05); }
+  fieldset { border: 0; border-top: 1px solid #e3e8ee; padding: 22px 0 0; margin: 24px 0 4px; }
+  fieldset.rr-first { border-top: 0; padding-top: 0; margin-top: 0; }
+  legend { font-family: %(subtitle)s; font-size: 11px; font-weight: 700; color: %(navy)s;
+           padding: 0; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.09em; }
+  .rr-field { margin-bottom: 16px; }
+  label { display: block; font-size: 13px; color: #3d4753; margin-bottom: 5px; font-weight: 600; }
+  label.rr-checklabel { font-weight: normal; color: #222; }
+  .rr-orglist { border: 1px solid %(gray)s; border-radius: 4px; padding: 6px 12px;
+             max-height: 320px; overflow-y: auto; background: #fff; }
+  .rr-orgcb { display: block; font-size: 14px; color: #222; padding: 5px 0;
+           font-weight: normal; border-bottom: 1px solid #f0f3f6; }
+  .rr-orgcb:last-child { border-bottom: 0; }
+  .rr-cnt { color: #6b7683; font-size: 12px; }
+  select, input[type=date] { font-family: %(body)s; font-size: 14px; padding: 7px 8px;
+          width: 100%%; max-width: 460px; border: 1px solid %(gray)s; border-radius: 4px;
+          background: #fff; color: #222; }
+  select:focus, input:focus { outline: 2px solid %(steel)s; outline-offset: 1px;
+          border-color: %(curious)s; }
+  button { font-family: %(subtitle)s; font-size: 14px; font-weight: 700; letter-spacing: 0.04em;
+           padding: 11px 30px; margin-top: 4px; color: #fff; background: %(navy)s;
+           border: 0; border-radius: 4px; cursor: pointer; text-transform: uppercase; }
+  button:hover { background: %(space)s; }
+  button:active { background: %(curious)s; }
+  .rr-hint { font-size: 12px; color: #6b7683; margin: 8px 0 0; line-height: 1.5; }
+  .rr-searchrow { position: relative; margin-bottom: 8px; }
+  .rr-searchrow input { width: 100%%; max-width: none; padding: 8px 34px 8px 10px; }
+  .rr-searchrow .rr-clear { position: absolute; right: 8px; top: 50%%; transform: translateY(-50%%);
+            border: 0; background: none; color: #8a949e; font-size: 18px; line-height: 1;
+            padding: 2px 4px; cursor: pointer; margin: 0; border-radius: 3px; }
+  .rr-searchrow .rr-clear:hover { color: %(navy)s; background: #eef2f6; }
+  .rr-listmeta { font-size: 12px; color: #6b7683; margin: 7px 0 0; }
+  .rr-listmeta strong { color: %(navy)s; }
+  .rr-noresults { font-size: 13px; color: #6b7683; padding: 14px 2px; font-style: italic; }
+  .rr-status { font-size: 13px; margin: 14px 0 4px; padding: 9px 12px; border-radius: 4px;
+            background: #eef4f9; border-left: 4px solid %(steel)s; color: %(space)s; line-height: 1.5; }
+  .rr-status.rr-off { background: #f4f5f6; border-left-color: %(gray)s; color: #63707d; }
+  select option:disabled { color: #a6adb5; }
+  .rr-hide { display: none !important; }
+""" % {
+    "body": BODY_FONT, "title": TITLE_FONT, "subtitle": SUBTITLE_FONT,
+    "navy": NAVY, "yellow": YELLOW, "space": SPACE_BLUE, "curious": CURIOUS_BLUE,
+    "steel": "#4580B9", "gray": LIGHT_GRAY,
+}
+
+# Stage 4 is a print artifact, so it stays mostly white -- brand colors are
+# used for rules/headings rather than filled backgrounds, to avoid burning
+# toner on a landscape roster that gets printed per section.
+ROSTER_CSS = """
+  @media print {
+    @page { size: landscape; margin: 0.4in; }
+    .rr-page-break { page-break-before: always; }
+    .rr-no-print { display: none; }
+    body { background: #fff; }
+  }
+  body { font-family: %(body)s; margin: 20px; color: #222; background: #fff; }
+  h1 { font-family: %(title)s; font-size: 26px; font-weight: normal; text-transform: uppercase;
+       letter-spacing: 0.02em; color: %(navy)s; margin: 0 0 4px;
+       border-bottom: 3px solid %(yellow)s; padding-bottom: 6px; }
+  .rr-church { font-family: %(subtitle)s; font-size: 10px; letter-spacing: 0.14em;
+            text-transform: uppercase; color: %(curious)s; margin: 0 0 2px; font-weight: 600; }
+  .rr-meta { color: #55606b; font-size: 13px; margin: 8px 0 16px; }
+  h2 { font-family: %(subtitle)s; font-size: 15px; font-weight: 700; color: %(navy)s;
+       margin-top: 24px; margin-bottom: 0; text-transform: uppercase; letter-spacing: 0.05em; }
+  .rr-count { font-weight: normal; color: #6b7683; font-size: 13px; letter-spacing: 0; text-transform: none; }
+  table { border-collapse: collapse; width: 100%%; margin-top: 8px; }
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; }
+  th, td { border: 1px solid %(gray)s; padding: 5px 6px; font-size: 12px;
+           text-align: left; white-space: nowrap; }
+  th { background: #eef2f6; color: %(navy)s; font-family: %(subtitle)s;
+       font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+  th.rr-mark, td.rr-mark { text-align: center; width: 32px; }
+  th.rr-total, td.rr-total { text-align: center; font-weight: bold; background: #fafbfc; }
+  /* Each grouped section is its own <table>, so browsers would otherwise size
+     the leading columns independently and the sections wouldn't line up
+     page-to-page. These are suggestions, not caps -- a long name still
+     widens its column. */
+  th:nth-child(1), td:nth-child(1) { width: 190px; }
+  th:nth-child(2), td:nth-child(2) { width: 80px; }
+  th:nth-child(3), td:nth-child(3) { width: 110px; }
+  a { color: %(curious)s; }
+""" % {
+    "body": BODY_FONT, "title": TITLE_FONT, "subtitle": SUBTITLE_FONT,
+    "navy": NAVY, "yellow": YELLOW, "curious": CURIOUS_BLUE, "gray": LIGHT_GRAY,
+}
+
+
+# The script's output is injected INTO a TouchPoint page that brings its own
+# (Bootstrap-derived) stylesheet, so generic class names like .bar, .card,
+# .status, .field and .hint are live collision risks -- TouchPoint's rules can
+# silently restyle or hide parts of this page, which is exactly what happened
+# to the header's eyebrow line on the first live run. Rather than renaming
+# every class, each rule is scoped under a single wrapper id at render time:
+# an id+class selector (1,1,0) outranks any plain class selector TouchPoint
+# defines, and `body` rules are retargeted at the wrapper so this page stops
+# trying to restyle TouchPoint's own <body>.
+ROOT_ID = "rpcAttendanceRoster"
+
+
+def scope_css(css, root="#" + ROOT_ID):
+    """Prefix every selector in `css` with `root`; retarget `body` to it."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)  # comments confuse the scanner
+
+    def block_end(text, start):
+        depth = 0
+        for k in range(start, len(text)):
+            if text[k] == "{":
+                depth += 1
+            elif text[k] == "}":
+                depth -= 1
+                if depth == 0:
+                    return k
+        return len(text) - 1
+
+    out, i = [], 0
+    while i < len(css):
+        brace = css.find("{", i)
+        if brace == -1:
+            out.append(css[i:])
+            break
+        selector = css[i:brace].strip()
+        end = block_end(css, brace)
+        if selector.startswith("@"):
+            # @media/@supports wrap real selectors; @page and friends don't.
+            if selector.startswith("@media") or selector.startswith("@supports"):
+                out.append("\n%s {%s}" % (selector, scope_css(css[brace + 1:end], root)))
+            else:
+                out.append("\n" + css[i:end + 1].strip())
+        else:
+            parts = []
+            for sel in selector.split(","):
+                sel = sel.strip()
+                if not sel:
+                    continue
+                parts.append(root if sel == "body" else root + " " + sel)
+            out.append("\n%s {%s}" % (", ".join(parts), css[brace + 1:end]))
+        i = end + 1
+    return "".join(out)
+
+
+def steps_html(current):
+    """Breadcrumb of the builder's three choose-steps, current one bolded."""
+    labels = ["1. Ministry", "2. Division", "3. Involvement + options"]
+    parts = []
+    for i, label in enumerate(labels, start=1):
+        cls = ' class="rr-on"' if i == current else ""
+        parts.append("<span{0}>{1}</span>".format(cls, label))
+    return '<span class="rr-sep">&rsaquo;</span>'.join(parts)
+
 
 # ============================================================
 # Helpers
@@ -239,6 +467,10 @@ def valid_group_by(value):
     return value if value in GROUP_BY_KEYS else DEFAULT_GROUP_BY
 
 
+def valid_sort_by(value):
+    return value if value in SORT_BY_KEYS else DEFAULT_SORT_BY
+
+
 def valid_since_date(value):
     # Strict YYYY-MM-DD only (what an HTML5 date input submits) -- anything
     # else (blank, malformed, a paste gone wrong) falls back to "no filter"
@@ -247,8 +479,13 @@ def valid_since_date(value):
     return value if re.match(r"^\d{4}-\d{2}-\d{2}$", value) else DEFAULT_SINCE_DATE
 
 
-def field_value(key, p):
-    """Display string for configurable-column field `key` on roster row p."""
+def field_value(key, p, sg_text=""):
+    """Display string for configurable-column field `key` on roster row p.
+
+    sg_text is the caller-computed, comma-joined sub-group label for this
+    (person, involvement) pair -- sub-groups live in their own lookup dict
+    rather than on the roster row itself, since one member can hold several.
+    """
     if key == "phone":
         return model.FmtPhone(p.CellPhone) if p.CellPhone else ""
     if key == "email":
@@ -266,16 +503,18 @@ def field_value(key, p):
         return p.LastName or ""
     if key == "involvement":
         return getattr(p, "Involvement", "") or ""
+    if key == "subgroup":
+        return sg_text or ""
     return ""  # "blank", or an unrecognized key -- render as an empty cell
 
 
-def render_picker(step_title, heading, meta_text, select_name, options_html, hidden_fields=None, back_href=None):
+def render_picker(step_title, heading, meta_text, select_name, options_html, hidden_fields=None, back_href=None, step_num=1):
     hidden_html = "".join(
         '<input type="hidden" name="{0}" value="{1}">'.format(k, v)
         for k, v in (hidden_fields or {}).items()
     )
     back_html = (
-        '<p class="back"><a href="{0}">&larr; Back</a></p>'.format(back_href)
+        '<p class="rr-back"><a href="{0}">&larr; Back</a></p>'.format(back_href)
         if back_href else ""
     )
     print(
@@ -284,30 +523,39 @@ def render_picker(step_title, heading, meta_text, select_name, options_html, hid
 <head>
 <meta charset="utf-8">
 <title>{step_title}</title>
-<style>
-  body {{ font-family: Arial, Helvetica, sans-serif; margin: 20px; color: #222; }}
-  h1 {{ font-size: 20px; margin-bottom: 4px; }}
-  .meta {{ color: #555; font-size: 13px; margin-bottom: 16px; }}
-  .back {{ margin-bottom: 12px; font-size: 13px; }}
-  select {{ font-size: 14px; padding: 6px; min-width: 420px; }}
-  button {{ font-size: 14px; padding: 6px 16px; margin-left: 8px; }}
-</style>
+<style>{css}</style>
 </head>
 <body>
+<div id="{root_id}">
+<div class="rr-bar">
+  <p class="rr-church">RockPointe Church</p>
+  <h1>Attendance Roster</h1>
+</div>
+<div class="rr-wrap">
 {back_html}
-<h1>{heading}</h1>
-<p class="meta">{meta_text}</p>
-<form method="get">
-  {hidden_html}
-  <select name="{select_name}" required>
-    <option value="">-- Select --</option>
-    {options_html}
-  </select>
-  <button type="submit">Apply</button>
-</form>
+<p class="rr-steps">{steps}</p>
+<div class="rr-card">
+  <p class="rr-meta">{meta_text}</p>
+  <form method="get">
+    {hidden_html}
+    <div class="rr-field">
+      <label for="{select_name}">{heading}</label>
+      <select name="{select_name}" id="{select_name}" required>
+        <option value="">-- Select --</option>
+        {options_html}
+      </select>
+    </div>
+    <button type="submit">Continue</button>
+  </form>
+</div>
+</div>
+</div>
 </body>
 </html>""".format(
             step_title=step_title,
+            css=scope_css(BUILDER_CSS),
+            root_id=ROOT_ID,
+            steps=steps_html(step_num),
             heading=heading,
             meta_text=meta_text,
             hidden_html=hidden_html,
@@ -318,32 +566,61 @@ def render_picker(step_title, heading, meta_text, select_name, options_html, hid
     )
 
 
-def render_org_and_options_picker(org_rows, selected_program, selected_division, col1, col2, group_by, since_date, exclude_zero):
+def render_org_and_options_picker(org_rows, selected_program, selected_division, col1, col2,
+                                  group_by, sort_by, since_date, exclude_zero, subgroup_counts):
+    """Stage 3: check involvement(s), then choose how the roster prints.
+
+    Sub-group availability is per-involvement, and this stage renders BEFORE
+    anything is checked -- so every org's sub-group count is handed to the
+    browser as a small JS map and the three sub-group choices below
+    enable/disable live as boxes are ticked, with a status line saying why.
+    Nothing is hidden: an unavailable choice stays visible but disabled and
+    labelled, so the option never silently appears and disappears.
+
+    This is a convenience layer only. valid_group_by()/valid_sort_by() plus
+    the stage-4 no-sub-groups fallback still backstop it server-side, so a
+    hand-edited URL or a browser with JS off produces a sane roster instead
+    of an error.
+    """
     # No pre-checking: this stage is only ever reached with zero validly-
     # selected orgs (any valid OrgIds jump straight to stage 4), so there's
     # never a prior selection worth restoring here.
-    checkbox_html = "".join(
-        '<label class="orgcb"><input type="checkbox" class="orgcheck" value="{oid}"> {name} ({count} member{plural})</label>'.format(
+    def org_checkbox(r):
+        n = subgroup_counts.get(r.OrganizationId, 0)
+        sg_note = (
+            ' &middot; {0} sub-group{1}'.format(n, "" if n == 1 else "s") if n else ""
+        )
+        return (
+            '<label class="rr-orgcb" data-name="{search_name}"><input type="checkbox" class="rr-orgcheck" value="{oid}" '
+            'data-subgroups="{sg}"> {name} <span class="rr-cnt">({count} member{plural}{sg_note})</span></label>'
+        ).format(
             oid=r.OrganizationId,
+            sg=n,
+            search_name=esc(str(r.OrganizationName or "").lower()).replace('"', "&quot;"),
             name=esc(r.OrganizationName),
             count=r.MemberCount,
             plural="" if r.MemberCount == 1 else "s",
+            sg_note=sg_note,
         )
-        for r in org_rows
-    )
 
-    def field_options_html(selected_key):
+    checkbox_html = "".join(org_checkbox(r) for r in org_rows)
+
+    def options_html(pairs, selected_key):
         return "".join(
-            '<option value="{0}"{1}>{2}</option>'.format(
-                key, ' selected' if key == selected_key else '', esc(label)
+            '<option value="{0}"{1}{2}>{3}</option>'.format(
+                key,
+                ' selected' if key == selected_key else '',
+                ' data-needs-subgroups="1"' if key == "subgroup" else '',
+                esc(label),
             )
-            for key, label in FIELD_OPTIONS
+            for key, label in pairs
         )
 
-    group_options_html = "".join(
-        '<option value="{0}"{1}>{2}</option>'.format(key, ' selected' if key == group_by else '', esc(label))
-        for key, label in GROUP_BY_OPTIONS
-    )
+    # Map of OrganizationId -> sub-group count, for the live JS check.
+    subgroup_map_js = "{" + ",".join(
+        '"{0}":{1}'.format(r.OrganizationId, subgroup_counts.get(r.OrganizationId, 0))
+        for r in org_rows
+    ) + "}"
 
     print(
         """<!DOCTYPE html>
@@ -351,79 +628,221 @@ def render_org_and_options_picker(org_rows, selected_program, selected_division,
 <head>
 <meta charset="utf-8">
 <title>Choose Involvement(s) -- Roster Report</title>
-<style>
-  body {{ font-family: Arial, Helvetica, sans-serif; margin: 20px; color: #222; }}
-  h1 {{ font-size: 20px; margin-bottom: 4px; }}
-  .meta {{ color: #555; font-size: 13px; margin-bottom: 16px; }}
-  .back {{ margin-bottom: 12px; font-size: 13px; }}
-  .field {{ margin-bottom: 16px; }}
-  label {{ display: block; font-size: 13px; color: #444; margin-bottom: 4px; }}
-  .orglist {{ border: 1px solid #ddd; border-radius: 4px; padding: 8px 12px; max-height: 320px; overflow-y: auto; min-width: 420px; }}
-  .orgcb {{ display: block; font-size: 14px; color: #222; padding: 3px 0; font-weight: normal; }}
-  select {{ font-size: 14px; padding: 6px; min-width: 420px; }}
-  button {{ font-size: 14px; padding: 8px 20px; margin-top: 8px; }}
-</style>
+<style>{css}</style>
 </head>
 <body>
-<p class="back"><a href="?ProgId={prog_id}">&larr; Back</a></p>
-<h1>Choose Involvement(s)</h1>
-<p class="meta">{count} active involvement(s) in {div_name}. Check one or more -- only combine involvements that share the same meeting schedule.</p>
+<div id="{root_id}">
+<div class="rr-bar">
+  <p class="rr-church">RockPointe Church</p>
+  <h1>Attendance Roster</h1>
+</div>
+<div class="rr-wrap">
+<p class="rr-back"><a href="?ProgId={prog_id}">&larr; Back</a></p>
+<p class="rr-steps">{steps}</p>
+<div class="rr-card">
+<p class="rr-meta">{count} active involvement(s) in {div_name}.</p>
 <form method="get" id="pickerForm">
   <input type="hidden" name="ProgId" value="{prog_id}">
   <input type="hidden" name="DivId" value="{div_id}">
   <input type="hidden" name="OrgIds" id="OrgIdsField" value="">
-  <div class="field">
-    <div class="orglist">{checkbox_html}</div>
-  </div>
-  <div class="field">
-    <label for="Col1">Column 1 (after Total)</label>
-    <select name="Col1" id="Col1">{col1_options}</select>
-  </div>
-  <div class="field">
-    <label for="Col2">Column 2 (after Total)</label>
-    <select name="Col2" id="Col2">{col2_options}</select>
-  </div>
-  <div class="field">
-    <label for="GroupBy">Group roster by</label>
-    <select name="GroupBy" id="GroupBy">{group_options}</select>
-  </div>
-  <div class="field">
-    <label for="SinceDate">Attendance since (optional -- leave blank for full history)</label>
-    <input type="date" name="SinceDate" id="SinceDate" value="{since_date}">
-  </div>
-  <div class="field">
-    <label class="checklabel"><input type="checkbox" name="ExcludeZero" value="1"{exclude_zero_checked}> Exclude members with zero attendance (within the date range above, if set)</label>
-  </div>
-  <button type="submit">Apply</button>
+  <fieldset class="rr-first">
+    <legend>Involvements</legend>
+    <div class="rr-searchrow">
+      <input type="search" id="orgSearch" autocomplete="off"
+             placeholder="Search involvements by name...">
+      <button type="button" class="rr-clear" id="orgSearchClear" title="Clear search" hidden>&times;</button>
+    </div>
+    <div class="rr-orglist" id="orgList">{checkbox_html}<p class="rr-noresults" id="noResults" hidden>No involvements match that search.</p></div>
+    <p class="rr-listmeta" id="listMeta"></p>
+    <p class="rr-hint">Check one or more. Only combine involvements that share the same meeting schedule &mdash; the attendance grid uses one shared set of dates.</p>
+    <p class="rr-status rr-off" id="sgStatus">Check an involvement above to see whether it has sub-groups.</p>
+  </fieldset>
+  <fieldset>
+    <legend>Print options</legend>
+    <div class="rr-field">
+      <label for="Col1">Column 1 (after Total)</label>
+      <select name="Col1" id="Col1">{col1_options}</select>
+    </div>
+    <div class="rr-field">
+      <label for="Col2">Column 2 (after Total)</label>
+      <select name="Col2" id="Col2">{col2_options}</select>
+    </div>
+    <div class="rr-field">
+      <label for="GroupBy">Group roster by (starts a new printed page per section)</label>
+      <select name="GroupBy" id="GroupBy">{group_options}</select>
+    </div>
+    <div class="rr-field">
+      <label for="SortBy">Sort members by</label>
+      <select name="SortBy" id="SortBy">{sort_options}</select>
+    </div>
+    <div class="rr-field">
+      <label for="SinceDate">Attendance since (optional -- leave blank for full history)</label>
+      <input type="date" name="SinceDate" id="SinceDate" value="{since_date}">
+    </div>
+    <div class="rr-field">
+      <label class="rr-checklabel"><input type="checkbox" name="ExcludeZero" value="1"{exclude_zero_checked}> Exclude members with zero attendance (within the date range above, if set)</label>
+    </div>
+  </fieldset>
+  <button type="submit">Build roster</button>
 </form>
-<script>
-document.getElementById('pickerForm').addEventListener('submit', function(e) {{
-  var checked = [];
-  var boxes = document.querySelectorAll('.orgcheck:checked');
-  for (var i = 0; i < boxes.length; i++) {{ checked.push(boxes[i].value); }}
-  if (checked.length === 0) {{
-    alert('Pick at least one involvement.');
-    e.preventDefault();
-    return;
-  }}
-  document.getElementById('OrgIdsField').value = checked.join(',');
-}});
-</script>
-</body>
-</html>""".format(
+</div>
+</div>
+</div>
+<script>var ORG_SUBGROUPS = {subgroup_map_js};</script>""".format(
+            css=scope_css(BUILDER_CSS),
+            root_id=ROOT_ID,
+            steps=steps_html(3),
             prog_id=selected_program.Id,
             div_id=selected_division.Id,
             div_name=esc(selected_division.Name),
             count=len(org_rows),
             checkbox_html=checkbox_html,
-            col1_options=field_options_html(col1),
-            col2_options=field_options_html(col2),
-            group_options=group_options_html,
+            col1_options=options_html(FIELD_OPTIONS, col1),
+            col2_options=options_html(FIELD_OPTIONS, col2),
+            group_options=options_html(GROUP_BY_OPTIONS, group_by),
+            sort_options=options_html(SORT_BY_OPTIONS, sort_by),
             since_date=esc(since_date),
             exclude_zero_checked=' checked' if exclude_zero else '',
+            subgroup_map_js=subgroup_map_js,
         )
     )
 
+    # Plain (unformatted) JS block -- kept out of the .format() above so its
+    # braces don't have to be doubled and mis-escaped.
+    print("""<script>
+(function () {
+  var form = document.getElementById('pickerForm');
+  var status = document.getElementById('sgStatus');
+  var selects = ['Col1', 'Col2', 'GroupBy', 'SortBy'].map(function (id) {
+    return document.getElementById(id);
+  });
+
+  function subgroupOption(sel) {
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].getAttribute('data-needs-subgroups') === '1') { return sel.options[i]; }
+    }
+    return null;
+  }
+
+  // Remember each sub-group option's real label so it can be restored when
+  // it becomes available again.
+  selects.forEach(function (sel) {
+    var opt = subgroupOption(sel);
+    if (opt) { opt.setAttribute('data-label', opt.text); }
+  });
+
+  function refresh() {
+    var boxes = document.querySelectorAll('.rr-orgcheck:checked');
+    var total = 0;
+    for (var i = 0; i < boxes.length; i++) {
+      total += parseInt(boxes[i].getAttribute('data-subgroups'), 10) || 0;
+    }
+    var available = total > 0;
+    var reverted = false;
+
+    selects.forEach(function (sel) {
+      var opt = subgroupOption(sel);
+      if (!opt) { return; }
+      opt.disabled = !available;
+      opt.text = available ? opt.getAttribute('data-label')
+                           : opt.getAttribute('data-label') + ' -- none in this selection';
+      if (!available && sel.value === opt.value) {
+        sel.selectedIndex = 0;
+        reverted = true;
+      }
+    });
+
+    if (boxes.length === 0) {
+      status.className = 'rr-status rr-off';
+      status.innerHTML = 'Check an involvement above to see whether it has sub-groups.';
+    } else if (available) {
+      status.className = 'rr-status';
+      status.innerHTML = '<strong>' + total + ' sub-group' + (total === 1 ? '' : 's') +
+        '</strong> found in your selection. You can now use Sub-Group as a column, ' +
+        'a sort order, or a page break under Print options below.';
+    } else {
+      status.className = 'rr-status rr-off';
+      status.innerHTML = 'The involvement(s) you checked have no sub-groups, so the ' +
+        'Sub-Group options under Print options are turned off' +
+        (reverted ? ' (your Sub-Group choice was reset).' : '.') +
+        ' Sub-groups are set up on the involvement itself in TouchPoint.';
+    }
+  }
+
+  // ---- Step 1 search: narrow a long involvement list ----------------
+  var search = document.getElementById('orgSearch');
+  var searchClear = document.getElementById('orgSearchClear');
+  var noResults = document.getElementById('noResults');
+  var listMeta = document.getElementById('listMeta');
+  var labels = document.querySelectorAll('.rr-orgcb');
+
+  function applySearch() {
+    var term = (search.value || '').trim().toLowerCase();
+    var shown = 0;
+    for (var i = 0; i < labels.length; i++) {
+      var match = !term || labels[i].getAttribute('data-name').indexOf(term) !== -1;
+      if (match) { labels[i].classList.remove('rr-hide'); shown++; }
+      else { labels[i].classList.add('rr-hide'); }
+    }
+    noResults.classList.toggle('rr-hide', shown !== 0);
+    searchClear.hidden = !term;
+    updateMeta(shown, term);
+  }
+
+  // A search only hides rows -- it never unchecks one. Anything already
+  // checked stays selected (and still counts toward sub-group availability
+  // and the roster), so the count below calls out hidden selections rather
+  // than letting them silently disappear.
+  function updateMeta(shown, term) {
+    var checked = document.querySelectorAll('.rr-orgcheck:checked');
+    var hiddenChecked = 0;
+    for (var i = 0; i < checked.length; i++) {
+      if (checked[i].parentNode.classList.contains('rr-hide')) { hiddenChecked++; }
+    }
+    var parts = [];
+    if (term) { parts.push('Showing <strong>' + shown + '</strong> of ' + labels.length); }
+    if (checked.length) { parts.push('<strong>' + checked.length + '</strong> selected'); }
+    if (hiddenChecked > 0) {
+      parts.push(hiddenChecked + ' of them hidden by the search (still included)');
+    }
+    listMeta.innerHTML = parts.join(' &middot; ');
+  }
+
+  search.addEventListener('input', applySearch);
+  search.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); }  // don't submit mid-search
+  });
+  searchClear.addEventListener('click', function () {
+    search.value = '';
+    applySearch();
+    search.focus();
+  });
+
+  var all = document.querySelectorAll('.rr-orgcheck');
+  for (var i = 0; i < all.length; i++) {
+    all[i].addEventListener('change', function () {
+      refresh();
+      applySearch();
+    });
+  }
+  refresh();
+  applySearch();
+
+  form.addEventListener('submit', function (e) {
+    var checked = [];
+    var boxes = document.querySelectorAll('.rr-orgcheck:checked');
+    for (var i = 0; i < boxes.length; i++) { checked.push(boxes[i].value); }
+    if (checked.length === 0) {
+      alert('Pick at least one involvement.');
+      e.preventDefault();
+      return;
+    }
+    document.getElementById('OrgIdsField').value = checked.join(',');
+  });
+})();
+</script>
+</body>
+</html>""")
 
 # ============================================================
 # Row-level security: who is looking at this?
@@ -475,6 +894,7 @@ if selected_program is None:
         meta_text="{0} ministry program(s) available. Pick one to see its divisions.".format(len(program_rows)),
         select_name="ProgId",
         options_html=options_html,
+        step_num=1,
     )
 
 else:
@@ -536,6 +956,7 @@ else:
             options_html=options_html,
             hidden_fields={"ProgId": selected_program.Id},
             back_href="?",
+            step_num=2,
         )
 
     else:
@@ -573,11 +994,35 @@ else:
         col1 = valid_field_key(str(getattr(model.Data, "Col1", "") or ""), DEFAULT_COL1)
         col2 = valid_field_key(str(getattr(model.Data, "Col2", "") or ""), DEFAULT_COL2)
         group_by = valid_group_by(str(getattr(model.Data, "GroupBy", "") or ""))
+        sort_by = valid_sort_by(str(getattr(model.Data, "SortBy", "") or ""))
         since_date = valid_since_date(str(getattr(model.Data, "SinceDate", "") or ""))
         exclude_zero = str(getattr(model.Data, "ExcludeZero", "") or "") == "1"
 
         if not selected_org_ids:
-            render_org_and_options_picker(org_rows, selected_program, selected_division, col1, col2, group_by, since_date, exclude_zero)
+            # How many sub-groups (dbo.MemberTags) each active org in this
+            # division defines, so stage 3 can enable/disable the Sub-Group
+            # choices live as boxes are ticked. Grouped by OrgId, so there's
+            # no fan-out risk; orgs with none simply don't come back and
+            # default to 0.
+            sql_subgroup_counts = """
+            SELECT mt.OrgId, COUNT(*) AS TagCount
+            FROM dbo.MemberTags mt
+            JOIN dbo.Organizations o ON o.OrganizationId = mt.OrgId
+            WHERE o.OrganizationStatusId = {active_status_id}
+              AND EXISTS (
+                  SELECT 1 FROM dbo.DivOrg d3 WHERE d3.OrgId = mt.OrgId AND d3.DivId = {div_id}
+              )
+            GROUP BY mt.OrgId
+            """.format(active_status_id=ACTIVE_STATUS_ID, div_id=selected_division.Id)
+
+            subgroup_counts = dict(
+                (r.OrgId, r.TagCount) for r in q.QuerySql(sql_subgroup_counts)
+            )
+
+            render_org_and_options_picker(
+                org_rows, selected_program, selected_division, col1, col2,
+                group_by, sort_by, since_date, exclude_zero, subgroup_counts,
+            )
 
         else:
             # ============================================================
@@ -625,6 +1070,7 @@ else:
                 Age = p.Age,
                 Grade = COALESCE(NULLIF(gl.Code, ''), NULLIF(gl.Description, ''), NULLIF(CAST(p.Grade AS VARCHAR(20)), ''), ''),
                 MaritalStatus = COALESCE(NULLIF(ms.Description, ''), NULLIF(ms.Code, ''), ''),
+                OrganizationId = om.OrganizationId,
                 Involvement = o2.OrganizationName
             FROM dbo.OrganizationMembers om
             JOIN dbo.People p ON p.PeopleId = om.PeopleId
@@ -655,15 +1101,85 @@ else:
               {since_date_clause}
             """.format(org_ids=org_ids_str, since_date_clause=since_date_clause)
 
+            # TouchPoint "SubGroups" for the selected involvement(s).
+            # OrgMemMemTags' composite PK is (OrgId, PeopleId, MemberTagId),
+            # so this returns exactly one row per member-per-sub-group with
+            # no fan-out. Deliberately NOT the STUFF/FOR XML PATH string-
+            # concat that roll-sheet-report/TPxi_RollSheet.py uses for the
+            # same data: FOR XML PATH XML-escapes the tag name, so a
+            # sub-group called "Men & Women" would come back as
+            # "Men &amp; Women" and be double-escaped by esc() on render.
+            # Joining the names in Python avoids that, and grouping needs
+            # the individual names anyway.
+            sql_subgroups = """
+            SELECT
+                ommt.PeopleId,
+                ommt.OrgId,
+                TagName = mt.Name
+            FROM dbo.OrgMemMemTags ommt
+            JOIN dbo.MemberTags mt ON mt.Id = ommt.MemberTagId
+            JOIN dbo.Organizations o3 ON o3.OrganizationId = ommt.OrgId
+            WHERE ommt.OrgId IN ({org_ids})
+            ORDER BY o3.OrganizationName, mt.Name
+            """.format(org_ids=org_ids_str)
+
             meeting_rows = list(q.QuerySql(sql_meetings))
             roster_rows = list(q.QuerySql(sql_roster))
             attend_rows = list(q.QuerySql(sql_attend))
+            subgroup_rows = list(q.QuerySql(sql_subgroups))
 
             meeting_dates = [normalize_date(r.MeetingDate) for r in meeting_rows]
 
             attended_by_person = {}
             for r in attend_rows:
                 attended_by_person.setdefault(r.PeopleId, set()).add(normalize_date(r.MeetingDate))
+
+            # Keyed by (PeopleId, OrganizationId), not PeopleId alone:
+            # sub-groups belong to a specific involvement, and someone in two
+            # selected involvements has a separate roster row per involvement
+            # (sql_roster reads from OrganizationMembers) with its own tags.
+            subgroups_by_member = {}
+            for r in subgroup_rows:
+                subgroups_by_member.setdefault((r.PeopleId, r.OrgId), []).append(r.TagName)
+
+            has_subgroups = bool(subgroup_rows)
+            multi_org = len(selected_org_ids) > 1
+
+            def subgroup_text(p):
+                """Comma-joined sub-group label for one roster row."""
+                return ", ".join(subgroups_by_member.get((p.PeopleId, p.OrganizationId), []))
+
+            def subgroup_section_labels(p):
+                """Every section this row belongs to when grouping by sub-group.
+
+                A member in two sub-groups is printed under both, so a page
+                handed to a sub-group's leader is complete. Sub-group names
+                are only unique within an involvement (MemberTags.OrgId), so
+                when several involvements are combined the section name is
+                prefixed with the involvement to keep two identically-named
+                sub-groups from merging into one page.
+                """
+                names = subgroups_by_member.get((p.PeopleId, p.OrganizationId), [])
+                if not names:
+                    return [NO_SUBGROUP_LABEL]
+                if multi_org:
+                    return ["{0}: {1}".format(p.Involvement, n) for n in names]
+                return list(names)
+
+            # A stale bookmark or a JS-less browser can still ask for a
+            # sub-group column/sort/grouping on involvements that have none.
+            # Fall back rather than printing an empty or confusing roster,
+            # and say so in the meta line instead of failing silently.
+            subgroup_unavailable = False
+            if not has_subgroups:
+                if group_by == "subgroup":
+                    group_by = DEFAULT_GROUP_BY
+                    subgroup_unavailable = True
+                if sort_by == "subgroup":
+                    sort_by = DEFAULT_SORT_BY
+                    subgroup_unavailable = True
+                if col1 == "subgroup" or col2 == "subgroup":
+                    subgroup_unavailable = True
 
             # Optional: drop anyone with zero attended meetings in the
             # (possibly since_date-filtered) range above -- e.g. printing
@@ -681,13 +1197,14 @@ else:
                     cells = []
                     for d in meeting_dates:
                         mark = "&#10003;" if d in dates_attended else ""
-                        cells.append('<td class="mark">{0}</td>'.format(mark))
+                        cells.append('<td class="rr-mark">{0}</td>'.format(mark))
                     total = len(dates_attended)
-                    col1_val = field_value(col1, p)
-                    col2_val = field_value(col2, p)
+                    sg_text = subgroup_text(p)
+                    col1_val = field_value(col1, p, sg_text)
+                    col2_val = field_value(col2, p, sg_text)
                     rows.append(
                         "<tr><td>{name}</td><td>{gender}</td><td>{mtype}</td>{cells}"
-                        '<td class="total">{total}</td><td>{col1}</td><td>{col2}</td></tr>'.format(
+                        '<td class="rr-total">{total}</td><td>{col1}</td><td>{col2}</td></tr>'.format(
                             name=esc(p.Name),
                             gender=esc(p.Gender),
                             mtype=esc(member_type_label(p.MemberTypeId)),
@@ -700,24 +1217,24 @@ else:
                 return "".join(rows)
 
             col_headers = "".join(
-                '<th class="mark">{0}</th>'.format(esc(fmt_col_header(d))) for d in meeting_dates
+                '<th class="rr-mark">{0}</th>'.format(esc(fmt_col_header(d))) for d in meeting_dates
             )
             col1_header = esc(FIELD_LABELS.get(col1, ""))
             col2_header = esc(FIELD_LABELS.get(col2, ""))
 
             def build_section_html(title, people, page_break):
-                break_class = " page-break" if page_break else ""
+                break_class = " rr-page-break" if page_break else ""
                 heading_html = (
-                    '<h2>{0} <span class="count">({1})</span></h2>'.format(esc(title), len(people))
+                    '<h2>{0} <span class="rr-count">({1})</span></h2>'.format(esc(title), len(people))
                     if title else ""
                 )
                 return """
-<div class="section{break_class}">
+<div class="rr-section{break_class}">
   {heading}
   <table>
     <thead>
       <tr>
-        <th>Name</th><th>Gender</th><th>Member Type</th>{col_headers}<th class="total">Total</th><th>{col1_header}</th><th>{col2_header}</th>
+        <th>Name</th><th>Gender</th><th>Member Type</th>{col_headers}<th class="rr-total">Total</th><th>{col1_header}</th><th>{col2_header}</th>
       </tr>
     </thead>
     <tbody>
@@ -732,6 +1249,15 @@ else:
                     col1_header=col1_header,
                     col2_header=col2_header,
                     rows=build_rows_html(people),
+                )
+
+            # Sub-group sort: stable, so sql_roster's ORDER BY (involvement,
+            # Leader-before-Member, name) survives as the tiebreak inside each
+            # sub-group. Members with no sub-group sort to the end.
+            if sort_by == "subgroup":
+                roster_rows = sorted(
+                    roster_rows,
+                    key=lambda p: (0, subgroup_text(p).lower()) if subgroup_text(p) else (1, ""),
                 )
 
             if group_by == "gender":
@@ -751,6 +1277,19 @@ else:
                 for p in roster_rows:
                     groups.setdefault(p.Involvement, []).append(p)
                 sections_data = [(name, people) for name, people in groups.items() if people]
+            elif group_by == "subgroup":
+                # One section (and printed page) per sub-group, alphabetical,
+                # with the no-sub-group catch-all always last. Members in
+                # multiple sub-groups appear in each of theirs, so the section
+                # counts can add up to more than the roster's total.
+                groups = {}
+                for p in roster_rows:
+                    for label in subgroup_section_labels(p):
+                        groups.setdefault(label, []).append(p)
+                ordered = sorted(k for k in groups if k != NO_SUBGROUP_LABEL)
+                sections_data = [(k, groups[k]) for k in ordered if groups[k]]
+                if groups.get(NO_SUBGROUP_LABEL):
+                    sections_data.append((NO_SUBGROUP_LABEL, groups[NO_SUBGROUP_LABEL]))
             else:
                 # No grouping: one flat list, already sorted via sql_roster's
                 # ORDER BY. No section heading -- the meta line above already
@@ -767,12 +1306,26 @@ else:
             # render_org_and_options_picker's note on why it doesn't
             # pre-check anything). Same behavior as the original single-
             # select version's back link.
-            back_href = "?ProgId={0}&amp;DivId={1}&amp;Col1={2}&amp;Col2={3}&amp;GroupBy={4}&amp;SinceDate={5}&amp;ExcludeZero={6}".format(
-                selected_program.Id, selected_division.Id, col1, col2, group_by, since_date, "1" if exclude_zero else ""
+            back_href = "?ProgId={0}&amp;DivId={1}&amp;Col1={2}&amp;Col2={3}&amp;GroupBy={4}&amp;SortBy={5}&amp;SinceDate={6}&amp;ExcludeZero={7}".format(
+                selected_program.Id, selected_division.Id, col1, col2, group_by, sort_by,
+                since_date, "1" if exclude_zero else ""
             )
 
             since_date_meta = " since {0}".format(esc(since_date)) if since_date else ""
             exclude_zero_meta = " &middot; excluding zero-attendance members" if exclude_zero else ""
+            if subgroup_unavailable:
+                subgroup_meta = (
+                    ' &middot; <strong>no sub-groups</strong> are set up on the selected '
+                    'involvement(s), so the sub-group option was skipped'
+                )
+            elif group_by == "subgroup":
+                subgroup_meta = (
+                    " &middot; grouped by sub-group (anyone in more than one is listed under each)"
+                )
+            elif sort_by == "subgroup":
+                subgroup_meta = " &middot; sorted by sub-group"
+            else:
+                subgroup_meta = ""
 
             print(
                 """<!DOCTYPE html>
@@ -780,39 +1333,27 @@ else:
 <head>
 <meta charset="utf-8">
 <title>{org_label} -- Roster</title>
-<style>
-  @media print {{
-    @page {{ size: landscape; margin: 0.4in; }}
-    .page-break {{ page-break-before: always; }}
-    .no-print {{ display: none; }}
-  }}
-  body {{ font-family: Arial, Helvetica, sans-serif; margin: 20px; color: #222; }}
-  h1 {{ font-size: 20px; margin-bottom: 4px; }}
-  .meta {{ color: #555; font-size: 13px; margin-bottom: 16px; }}
-  h2 {{ font-size: 16px; margin-top: 24px; }}
-  .count {{ font-weight: normal; color: #666; font-size: 13px; }}
-  table {{ border-collapse: collapse; width: 100%; margin-top: 8px; }}
-  thead {{ display: table-header-group; }}
-  tr {{ page-break-inside: avoid; }}
-  th, td {{ border: 1px solid #ccc; padding: 4px 6px; font-size: 12px; text-align: left; white-space: nowrap; }}
-  th {{ background: #f2f2f2; }}
-  th.mark, td.mark {{ text-align: center; width: 32px; }}
-  th.total, td.total {{ text-align: center; font-weight: bold; background: #fafafa; }}
-</style>
+<style>{css}</style>
 </head>
 <body>
-<p class="no-print"><a href="{back_href}">&larr; Choose different involvement(s)</a></p>
-<h1>{org_label} -- Roster</h1>
-<p class="meta">{org_count} involvement(s) &middot; {meeting_count} meeting(s){since_date_meta} through {last_date} &middot; {total_count} total member(s){exclude_zero_meta}</p>
+<div id="{root_id}">
+<p class="rr-no-print"><a href="{back_href}">&larr; Choose different involvement(s)</a></p>
+<p class="rr-church">RockPointe Church</p>
+<h1>{org_label}</h1>
+<p class="rr-meta">{org_count} involvement(s) &middot; {meeting_count} meeting(s){since_date_meta} through {last_date} &middot; {total_count} total member(s){exclude_zero_meta}{subgroup_meta}</p>
 {sections}
+</div>
 </body>
 </html>""".format(
                     org_label=esc(org_label),
+                    css=scope_css(ROSTER_CSS),
+                    root_id=ROOT_ID,
                     back_href=back_href,
                     org_count=len(selected_org_ids),
                     meeting_count=len(meeting_dates),
                     since_date_meta=since_date_meta,
                     exclude_zero_meta=exclude_zero_meta,
+                    subgroup_meta=subgroup_meta,
                     last_date=esc(fmt_col_header(meeting_dates[-1])) if meeting_dates else "n/a",
                     total_count=len(roster_rows),
                     sections=sections_html,
