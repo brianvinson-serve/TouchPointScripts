@@ -4,6 +4,8 @@ Printable Leader/Member roster + weekly attendance grid for one or more active i
 
 Involvement **sub-groups** (TouchPoint's SubGroups feature) can be used as a column, a sort order, or a page break — offered only when the involvement(s) you picked actually have any. See "Sub-groups" below.
 
+**Want counts rather than names?** `attendance-count-report/RPC_AttendanceCounts.py` is the sibling report: the same Ministry → Division → Involvement(s) walkthrough, but the output is a per-involvement attendance-counts grid in the SM/CM dashboard's shape instead of a printable roster.
+
 ## History
 
 Originally `AD_ReNewRosterReport.py`, built for Adult Discipleship's ReNew ministry with a hardcoded `DIVISION_FILTERS` list covering just the two AD divisions. Generalized 2026-08-30 into `RPC_AttendanceRoster.py` after evaluating [`bswaby/Touchpoint`](https://github.com/bswaby/Touchpoint)'s Roll Sheet tool (see `roll-sheet-report/`), which showed the value of a live-schema-driven picker over a hand-maintained config list. Same day: added configurable columns, gender/involvement/no grouping, multi-involvement selection, and row-level security.

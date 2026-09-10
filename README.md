@@ -8,6 +8,7 @@ Local development environment for TouchPoint scripts and automation.
 |-----------|-------------|
 | `outstanding-task-notifications/` | SM staff outstanding task email notification system |
 | `attendance-dashboard/` | Attendance reporting dashboard |
+| `attendance-count-report/` | Church-wide attendance **count** report — the roster report's ministry picker, the attendance dashboard's counts grid |
 | `data-dictionary-expander/` | Read-only exploratory SQL scripts for confirming TouchPoint table/column notes for `DB_REFERENCE.md` |
 
 ## Quick Start

@@ -10,6 +10,8 @@
 - `sm-flash-attendance-report.py` — untracked draft found in the repo 2026-08-30, broken and wrong-ministry (queries non-existent tables, CM subject/recipients despite the SM filename). Needs triage before any fix; not related to the script below. See `BACKLOG.md`.
 - `BACKLOG.md` — request and rollout status.
 
+**Related, deliberately separate:** `attendance-count-report/RPC_AttendanceCounts.py` is the church-wide on-demand counts report — any ministry via a live picker, rather than SM/CM hardcoded. It counts `Attend` rows (so it can split Members from Leaders) where these dashboards count `Meetings.NumPresent`, so the two can legitimately disagree when a meeting records a headcount larger than the number of people actually marked. Check which source a report used before filing a discrepancy.
+
 ## `SM_AttendanceDashboardEmail.py` — one script, two attendance types, two purposes per type
 
 The script determines its own **mode** (which attendance to report) and **action** (view vs. send) from the day of the week, using Python's own clock (`datetime.now().date().weekday()`), not `model.DayOfWeek` — see the file's header comment for why.
