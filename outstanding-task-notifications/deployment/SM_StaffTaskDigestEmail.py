@@ -156,14 +156,14 @@ for pid, name in SM_STAFF:
     elif oldest >= HIGHLIGHT_DAYS_OLD:
         status_cell = '<span style="color:#d68910;font-weight:bold;">Getting old</span>'
     else:
-        status_cell = '<span style="color:#3498db;">On track</span>'
+        status_cell = '<span style="color:#1D6A94;">On track</span>'
 
     summary_rows += """
     <tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #e1e8ed;">{name}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #e1e8ed;text-align:center;">{count}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #e1e8ed;text-align:center;">{oldest}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #e1e8ed;">{status}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #D1D3D4;">{name}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #D1D3D4;text-align:center;">{count}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #D1D3D4;text-align:center;">{oldest}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #D1D3D4;">{status}</td>
     </tr>
     """.format(name=name, count=count, oldest=(oldest if count else "—"), status=status_cell)
 
@@ -193,23 +193,23 @@ for pid, name in SM_STAFF:
             border = "#d68910"
             badge = '<span style="background:#d68910;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">{} days old</span>'.format(days_old)
         else:
-            border = "#3498db"
-            badge = '<span style="background:#3498db;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">{} days old</span>'.format(days_old)
+            border = "#1D6A94"
+            badge = '<span style="background:#1D6A94;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">{} days old</span>'.format(days_old)
 
         task_rows += """
-        <div style="border:1px solid {border};margin:0.75em 0;padding:1em;border-radius:6px;background:#f9f9f9;">
+        <div style="border:1px solid {border};margin:0.75em 0;padding:1em;border-radius:6px;background:#f7f9fb;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5em;">
                 <strong>About: {about}</strong>
                 {badge}
             </div>
-            <div style="font-size:13px;color:#555;margin-bottom:0.5em;">
+            <div style="font-size:13px;color:#55606b;margin-bottom:0.5em;">
                 Created {created} &middot; Due {due}
             </div>
             <div style="background:white;padding:0.75em;border-left:3px solid {border};">
                 {instructions}
             </div>
             <div style="margin-top:0.5em;">
-                <a href="{host}/Person2/{about_id}#tab-touchpoints" style="color:#27ae60;text-decoration:none;font-size:13px;">View Profile &rarr;</a>
+                <a href="{host}/Person2/{about_id}#tab-touchpoints" style="color:#1D6A94;text-decoration:none;font-size:13px;">View Profile &rarr;</a>
             </div>
         </div>
         """.format(
@@ -224,34 +224,41 @@ for pid, name in SM_STAFF:
         )
 
     detail_sections += """
-    <h3 style="color:#2c3e50;border-bottom:2px solid #d9e2ec;padding-bottom:4px;margin-top:1.75em;">{name} ({count})</h3>
+    <h3 style="color:#0C2340;border-bottom:2px solid #D1D3D4;padding-bottom:4px;margin-top:1.75em;">{name} ({count})</h3>
     {rows}
     """.format(name=name, count=len(staff_tasks), rows=task_rows)
 
 body = """
-<div style="font-family:Arial,Helvetica,sans-serif;max-width:760px;margin:0 auto;color:#222;">
+<div style="margin:0;padding:0;background:#f7f9fb;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f7f9fb;">
+    <tr><td align="center" style="padding:16px 8px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:760px;background:#ffffff;border-radius:10px;overflow:hidden;">
+        <tr><td style="padding:22px 18px;background:#0C2340;border-bottom:4px solid #FFD242;font-family:Arial,sans-serif;color:#ffffff;">
+          <div style="font-size:22px;line-height:28px;font-weight:bold;">Student Ministry Staff Task Digest</div>
+        </td></tr>
+        <tr><td style="padding:18px;font-family:Arial,Helvetica,sans-serif;color:#222;">
     <p>Hi Max,</p>
     <p>Here's the Student Ministry team's outstanding TouchPoint task status for the week.</p>
 
     <div style="display:flex;gap:10px;margin:1.25em 0;">
-        <div style="flex:1;background:#f7fafc;border:1px solid #d9e2ec;border-radius:8px;padding:12px;text-align:center;">
+        <div style="flex:1;background:#f7f9fb;border:1px solid #D1D3D4;border-radius:8px;padding:12px;text-align:center;">
             <div style="font-size:24px;font-weight:800;">{total}</div>
-            <div style="font-size:12px;color:#52606d;">Open tasks</div>
+            <div style="font-size:12px;color:#55606b;">Open tasks</div>
         </div>
         <div style="flex:1;background:#fff5f5;border:1px solid #fca5a5;border-radius:8px;padding:12px;text-align:center;">
             <div style="font-size:24px;font-weight:800;color:#e74c3c;">{overdue}</div>
-            <div style="font-size:12px;color:#52606d;">Overdue</div>
+            <div style="font-size:12px;color:#55606b;">Overdue</div>
         </div>
         <div style="flex:1;background:#fffbeb;border:1px solid #fbbf24;border-radius:8px;padding:12px;text-align:center;">
             <div style="font-size:24px;font-weight:800;color:#d68910;">{old}</div>
-            <div style="font-size:12px;color:#52606d;">{highlight_days}+ days old</div>
+            <div style="font-size:12px;color:#55606b;">{highlight_days}+ days old</div>
         </div>
     </div>
 
-    <h2 style="color:#2c3e50;">By staff member</h2>
+    <h2 style="color:#0C2340;">By staff member</h2>
     <table style="width:100%;border-collapse:collapse;">
         <thead>
-            <tr style="background:#243b53;color:white;">
+            <tr style="background:#183D5F;color:white;">
                 <th style="padding:8px 10px;text-align:left;">Staff</th>
                 <th style="padding:8px 10px;">Open</th>
                 <th style="padding:8px 10px;">Oldest (days)</th>
@@ -266,14 +273,18 @@ body = """
     {detail_header}
     {detail_sections}
 
-    <hr style="border:0;border-top:1px solid #ddd;margin:24px 0;">
-    <p style="font-size:12px;color:#888;">
+    <hr style="border:0;border-top:1px solid #D1D3D4;margin:24px 0;">
+    <p style="font-size:12px;color:#6b7683;">
         Source: TaskNote. Open = Pending/Active, not archived, not a note, excluding New Person Data Entry
         housekeeping tasks. A staff member is "accountable" for a task as its assignee, or as owner when
         no assignee is set. Staff roster is hardcoded and maintained in DB_REFERENCE.md -- update it when
         SM staff change.
     </p>
     <p><strong>RockPointe Student Ministry</strong><br>rockpointechurch.org</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
 </div>
 """.format(
     total=total_count,

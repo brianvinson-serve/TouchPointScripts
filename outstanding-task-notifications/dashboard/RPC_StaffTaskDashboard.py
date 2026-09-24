@@ -269,10 +269,6 @@ def department_sort_key(name):
     return (1 if name in LOW_PRIORITY_DEPARTMENTS else 0, name)
 
 
-# ---------------------------------------------------------------------------
-# Query params / filters
-# ---------------------------------------------------------------------------
-
 department_filter = get_param("dept", "all")
 group_filter = get_param("type", "all")
 keyword_filter = get_param("kw", "all")
@@ -301,12 +297,9 @@ if person_filter != "all":
     except ValueError:
         person_filter = "all"
 
-# ---------------------------------------------------------------------------
-# Data pull -- one query, all filtering/bucketing done in Python since the
-# dataset is small (a few hundred open tasks church-wide) and department is
-# a code-side roster lookup, not something SQL can join to.
-# ---------------------------------------------------------------------------
-
+# Filtering/bucketing happens in Python, not SQL: the dataset is small (a few
+# hundred open tasks church-wide), and department is a code-side roster
+# lookup, not something SQL can join to.
 task_sql = """
 SELECT
     tn.TaskNoteId,
@@ -412,10 +405,6 @@ def matches_filters(task):
 
 filtered = [t for t in tasks if matches_filters(t)]
 
-# ---------------------------------------------------------------------------
-# Aggregates
-# ---------------------------------------------------------------------------
-
 total_count = len(filtered)
 overdue_count = sum(1 for t in filtered if t["is_overdue"])
 forgotten_count = sum(1 for t in filtered if t["age_bucket"] == "Forgotten")
@@ -454,30 +443,28 @@ for t in filtered:
     for group in t["keyword_groups"]:
         group_counts[group] = group_counts.get(group, 0) + 1
 
-# ---------------------------------------------------------------------------
-# Rendering
-# ---------------------------------------------------------------------------
-
 print("""
 <style>
 .rpc-task-dashboard { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2933; }
-.rpc-task-dashboard .hero { background: #12355b; color: white; border-radius: 12px; padding: 22px 26px; margin-bottom: 18px; }
+.rpc-task-dashboard .hero { background: #0C2340; color: white; border-radius: 12px; padding: 22px 26px; margin-bottom: 18px; border-bottom: 4px solid #FFD242; }
 .rpc-task-dashboard .hero h1 { margin: 0 0 6px 0; font-size: 28px; }
 .rpc-task-dashboard .hero p { margin: 0; opacity: .9; }
 .rpc-task-dashboard .cards { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
-.rpc-task-dashboard .card { flex: 1; min-width: 155px; background: #f7fafc; border: 1px solid #d9e2ec; border-radius: 10px; padding: 14px; }
+.rpc-task-dashboard .card { flex: 1; min-width: 155px; background: #f7f9fb; border: 1px solid #D1D3D4; border-radius: 10px; padding: 14px; }
 .rpc-task-dashboard .card.warn { background: #fff5f5; border-color: #fca5a5; }
 .rpc-task-dashboard .metric { font-size: 30px; font-weight: 800; line-height: 1; }
-.rpc-task-dashboard .label { color: #52606d; font-size: 13px; margin-top: 5px; }
-.rpc-task-dashboard .filters { background: #f0f4f8; border: 1px solid #d9e2ec; border-radius: 10px; padding: 14px; margin-bottom: 18px; }
+.rpc-task-dashboard .label { color: #55606b; font-size: 13px; margin-top: 5px; }
+.rpc-task-dashboard .filters { background: #eef2f6; border: 1px solid #D1D3D4; border-radius: 10px; padding: 14px; margin-bottom: 18px; }
 .rpc-task-dashboard .filters form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 0; }
-.rpc-task-dashboard .field label { display: block; font-size: 12px; color: #52606d; font-weight: 700; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
-.rpc-task-dashboard select { padding: 7px 10px; border: 1px solid #bcccdc; border-radius: 6px; background: white; max-width: 220px; }
-.rpc-task-dashboard button, .rpc-task-dashboard .button { background: #0b6bcb; color: white; border: 0; border-radius: 6px; padding: 8px 13px; text-decoration: none; cursor: pointer; display: inline-block; }
-.rpc-task-dashboard .button.secondary { background: #627d98; }
+.rpc-task-dashboard .field label { display: block; font-size: 12px; color: #55606b; font-weight: 700; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+.rpc-task-dashboard select { padding: 7px 10px; border: 1px solid #D1D3D4; border-radius: 6px; background: white; max-width: 220px; }
+.rpc-task-dashboard button, .rpc-task-dashboard .button { background: #0C2340; color: white; border: 0; border-radius: 6px; padding: 8px 13px; text-decoration: none; cursor: pointer; display: inline-block; }
+.rpc-task-dashboard button:hover, .rpc-task-dashboard .button:hover { background: #183D5F; }
+.rpc-task-dashboard .button.secondary { background: #4580B9; }
+.rpc-task-dashboard .button.secondary:hover { background: #1D6A94; }
 .rpc-task-dashboard table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
-.rpc-task-dashboard th { background: #243b53; color: white; text-align: left; padding: 10px; font-size: 13px; }
-.rpc-task-dashboard td { border-bottom: 1px solid #d9e2ec; padding: 9px 10px; vertical-align: top; }
+.rpc-task-dashboard th { background: #183D5F; color: white; text-align: left; padding: 10px; font-size: 13px; }
+.rpc-task-dashboard td { border-bottom: 1px solid #D1D3D4; padding: 9px 10px; vertical-align: top; }
 .rpc-task-dashboard tr.overdue td { background: #fff5f5; }
 .rpc-task-dashboard tr.forgotten td { background: #fffbeb; }
 .rpc-task-dashboard .pill { display: inline-block; border-radius: 999px; padding: 3px 9px; font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -486,14 +473,14 @@ print("""
 .rpc-task-dashboard .pill.yellow { background: #fff3bf; color: #7c5e10; }
 .rpc-task-dashboard .pill.blue { background: #dbeafe; color: #1d4ed8; }
 .rpc-task-dashboard .pill.gray { background: #e5e7eb; color: #374151; }
-.rpc-task-dashboard .keyword-chip { display: inline-block; background: #eef2ff; color: #3730a3; border-radius: 6px; padding: 2px 7px; font-size: 11px; margin: 1px 3px 1px 0; }
+.rpc-task-dashboard .keyword-chip { display: inline-block; background: #dceefa; color: #1D6A94; border-radius: 6px; padding: 2px 7px; font-size: 11px; margin: 1px 3px 1px 0; }
 .rpc-task-dashboard .instructions { max-width: 460px; }
-.rpc-task-dashboard .muted { color: #627d98; }
-.rpc-task-dashboard .banner { background: #fffbeb; border: 1px solid #fbbf24; border-radius: 8px; padding: 10px 14px; margin-bottom: 18px; font-size: 14px; }
+.rpc-task-dashboard .muted { color: #6b7683; }
+.rpc-task-dashboard .banner { background: #fff8e1; border: 1px solid #FFD242; border-radius: 8px; padding: 10px 14px; margin-bottom: 18px; font-size: 14px; color: #6b5600; }
 .rpc-task-dashboard .empty { text-align: center; padding: 32px; background: #f0fff4; border: 1px solid #c6f6d5; border-radius: 10px; color: #276749; font-weight: 700; }
 .rpc-task-dashboard .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
-.rpc-task-dashboard .tabs a { padding: 8px 16px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px; color: #243b53; background: #e4e9f0; }
-.rpc-task-dashboard .tabs a.active { background: #0b6bcb; color: white; }
+.rpc-task-dashboard .tabs a { padding: 8px 16px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 14px; color: #183D5F; background: #eef2f6; }
+.rpc-task-dashboard .tabs a.active { background: #0C2340; color: white; }
 .rpc-task-dashboard table.matrix td, .rpc-task-dashboard table.matrix th { text-align: center; }
 .rpc-task-dashboard table.matrix td:first-child, .rpc-task-dashboard table.matrix th:first-child { text-align: left; }
 </style>
@@ -624,7 +611,6 @@ if not filtered:
     print('<div class="empty">No open tasks match these filters.</div>')
 
 elif view_filter == "rollup":
-    # Department x age-bucket matrix
     print('<h3>By Department</h3>')
     print('<table class="matrix"><thead><tr><th>Department</th>')
     for label in AGE_BUCKET_LABELS:
@@ -655,7 +641,6 @@ elif view_filter == "rollup":
     print('<td><strong>{}</strong></td><td><strong>{}</strong></td></tr>'.format(totals_row["total"], totals_row["overdue"]))
     print('</tbody></table>')
 
-    # Task-type breakdown
     print('<h3>By Task Type</h3>')
     print('<p class="muted">A task can carry more than one type, so these can add up to more than the total task count.</p>')
     print('<table><thead><tr><th>Type</th><th>Tasks</th></tr></thead><tbody>')
@@ -665,7 +650,6 @@ elif view_filter == "rollup":
             print('<tr><td>{}</td><td>{}</td></tr>'.format(html_escape(group), count))
     print('</tbody></table>')
 
-    # Owner workload leaderboard
     print('<h3>By Staff Member</h3>')
     print('<table><thead><tr><th>Staff Member</th><th>Department</th><th>Open</th><th>Overdue</th><th>Oldest</th></tr></thead><tbody>')
     workload_order = sorted(owner_workload.items(), key=lambda kv: kv[1]["count"], reverse=True)
@@ -681,7 +665,7 @@ elif view_filter == "rollup":
     print('</tbody></table>')
 
 else:
-    # Detail view -- worst first: overdue before not-overdue, oldest first within each.
+    # Worst-first ordering: overdue tasks before non-overdue, oldest before newest.
     detail_tasks = sorted(filtered, key=lambda t: (0 if t["is_overdue"] else 1, -t["days_old"]))
     print("""
   <table>

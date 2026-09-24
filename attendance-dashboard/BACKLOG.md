@@ -67,18 +67,19 @@ Active work and request status for the Student Ministry attendance dashboard.
 
 **Proposed fix:** in `sm-attendance-flat.sql` and `sm-attendance-pyreport.py`, exclude meetings that haven't occurred yet and any `DidNotMeet`/`Canceled` meetings (e.g. `m.MeetingDate <= GETDATE() AND` a not-yet-confirmed `DidNotMeet`/cancel-flag check — confirm the exact column against `DB_REFERENCE.md`/live schema before wiring in).
 
-### `sm-flash-attendance-report.py`: broken, wrong-ministry draft sitting untracked
+### `sm-flash-attendance-report.py`: broken, wrong-ministry draft — removed
 
-**Status:** Found 2026-08-30, untracked in the repo — needs triage before it's committed or run
-**Requestor:** Brian (found during a routine dashboard review)
+**Status:** RESOLVED 2026-09-23 — file deleted.
+**Requestor:** Brian (found during a routine dashboard review 2026-08-30; removal confirmed 2026-09-23 during the branding/efficiency pass)
 
-An untracked file, `attendance-dashboard/sm-flash-attendance-report.py`, is sitting in the repo (not committed, present at session start — possibly Kenny/Hermes WIP, unconfirmed). It appears broken and mis-scoped:
+An untracked file, `attendance-dashboard/sm-flash-attendance-report.py`, was found sitting in the repo 2026-08-30 (not committed at the time, possibly Kenny/Hermes WIP, unconfirmed origin). It was broken and mis-scoped:
 
-- Invalid T-SQL: `JOIN OrganizationMember om ON ... om.OrganizationId = o.Id` references alias `o` before the `JOIN Organization o` line that defines it — will throw a binding error if run.
-- Table/column names don't match RPC's confirmed schema per `DB_REFERENCE.md` (`Attendance`/`Organization`/`Campus` instead of the confirmed `Attend`/`Organizations`/`lookup.Campus`).
-- Despite the `sm-` filename, the email subject and body both say "Children's Ministry Attendance Report," and the recipient list includes Angela Cheshire (the CM contact from the CM email rebuild item above), not SM's confirmed 12 recipients from `DB_REFERENCE.md`.
+- Invalid T-SQL: `JOIN OrganizationMember om ON ... om.OrganizationId = o.Id` references alias `o` before the `JOIN Organization o` line that defines it — would throw a binding error if run.
+- Table/column names didn't match RPC's confirmed schema per `DB_REFERENCE.md` (`Attendance`/`Organization`/`Campus` instead of the confirmed `Attend`/`Organizations`/`lookup.Campus`).
+- Despite the `sm-` filename, the email subject and body both said "Children's Ministry Attendance Report," and the recipient list used PeopleIds that don't match any of the real confirmed IDs used elsewhere in this repo for the same 10 people.
+- Used `e = model.Email; e.ToPersonId = ...; model.SendEmail(e)` — not the `model.Email(recipient_query, ...)` pattern every other script in this repo uses.
 
-Needs confirmation of origin/intent before any fix — do not deploy as-is.
+It was later committed as-is in `d0b966f` (2026-09-01) without being fixed, despite that commit's message describing working Sunday/Wednesday functionality — the committed file was still the same broken draft. Confirmed dead: `SM_AttendanceDashboardEmail.py` already covers everything this was meant to do (Sunday + Wednesday, campus filtering, recap email) correctly. Deleted rather than repaired.
 
 ### CM email rebuild: mirrored dashboard fixes + 6-week average
 

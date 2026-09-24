@@ -203,31 +203,38 @@ print(
 <meta charset="utf-8">
 <title>Mobile App Channels Report</title>
 <style>
-  body {{ font-family: Arial, Helvetica, sans-serif; margin: 20px; color: #222; }}
-  h1 {{ font-size: 20px; margin-bottom: 4px; }}
-  .meta {{ color: #555; font-size: 13px; margin-bottom: 16px; }}
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 0 0 30px; color: #222; background: #f7f9fb; }}
+  .cr-bar {{ background: #0C2340; border-bottom: 4px solid #FFD242; padding: 20px 24px 16px; margin-bottom: 20px; }}
+  .cr-bar h1 {{ font-family: "Bebas Neue", Impact, "Arial Narrow", sans-serif; font-size: 26px; letter-spacing: 0.03em; color: #fff; margin: 0; font-weight: normal; text-transform: uppercase; }}
+  .cr-wrap {{ max-width: 1400px; margin: 0 auto; padding: 0 24px; }}
+  .meta {{ color: #55606b; font-size: 13px; margin-bottom: 16px; }}
   .controls {{ display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }}
-  .controls label {{ font-size: 13px; color: #444; }}
-  select {{ font-size: 14px; padding: 6px; }}
-  button {{ font-size: 14px; padding: 6px 16px; cursor: pointer; }}
-  table {{ border-collapse: collapse; width: 100%; }}
-  th, td {{ border: 1px solid #ccc; padding: 5px 8px; font-size: 13px; text-align: left; }}
-  th {{ background: #f2f2f2; position: sticky; top: 0; }}
+  .controls label {{ font-size: 13px; color: #3d4753; font-weight: 600; }}
+  select {{ font-size: 14px; padding: 6px 8px; border: 1px solid #D1D3D4; border-radius: 4px; }}
+  button {{ font-size: 13px; font-weight: 700; padding: 8px 18px; cursor: pointer; border: 0; border-radius: 4px; background: #0C2340; color: #fff; text-transform: uppercase; letter-spacing: 0.03em; }}
+  button:hover {{ background: #183D5F; }}
+  button[type="button"] {{ background: #4580B9; }}
+  button[type="button"]:hover {{ background: #1D6A94; }}
+  table {{ border-collapse: collapse; width: 100%; background: #fff; box-shadow: 0 1px 2px rgba(12,35,64,0.08); }}
+  th, td {{ border: 1px solid #D1D3D4; padding: 5px 8px; font-size: 13px; text-align: left; }}
+  th {{ background: #0C2340; color: #fff; position: sticky; top: 0; font-weight: 600; }}
   td.mark {{ text-align: center; width: 60px; }}
   td.num {{ text-align: center; width: 70px; }}
   td.status {{ font-weight: bold; }}
   .status-active {{ color: #1a7a1a; }}
   .status-inactive {{ color: #a33; }}
-  tr:nth-child(even) {{ background: #fafafa; }}
+  tr:nth-child(even) {{ background: #f7f9fb; }}
   th.sortable {{ cursor: pointer; user-select: none; white-space: nowrap; }}
-  th.sortable:hover {{ background: #e6e6e6; }}
-  th.sortable::after {{ content: '\\2195'; color: #999; margin-left: 4px; font-size: 11px; }}
-  th.sortable.sort-asc::after {{ content: '\\2191'; color: #222; }}
-  th.sortable.sort-desc::after {{ content: '\\2193'; color: #222; }}
+  th.sortable:hover {{ background: #183D5F; }}
+  th.sortable::after {{ content: '\\2195'; color: #76C2E3; margin-left: 4px; font-size: 11px; }}
+  th.sortable.sort-asc::after {{ content: '\\2191'; color: #FFD242; }}
+  th.sortable.sort-desc::after {{ content: '\\2193'; color: #FFD242; }}
 </style>
 </head>
 <body>
-<h1>Mobile App Channels Report</h1>
+<div class="cr-bar"><div class="cr-wrap"><h1>Mobile App Channels Report</h1></div></div>
+<div class="cr-wrap">
 <p class="meta">{total} channel(s) enabled &middot; {active_count} Active &middot; {inactive_count} Inactive</p>
 <form method="get" class="controls">
   <label for="Status">Show:</label>
@@ -254,6 +261,7 @@ print(
     {table_rows}
   </tbody>
 </table>
+</div>
 <script>
 function csvCell(v) {{
   v = String(v == null ? '' : v);

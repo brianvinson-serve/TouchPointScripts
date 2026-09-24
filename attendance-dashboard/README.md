@@ -7,7 +7,6 @@
 - `sm-attendance-flat.sql` — flat attendance export/query source.
 - `sm-dashboard.html` — local CSV-driven dashboard helper.
 - `sm-attendance-3yr-gender-history.sql` — 3-year Sunday attendance-by-gender pull for Central/Parker Square, gender from `People.GenderId` rather than org-name parsing (so it survives involvement/naming changes across years). Ad hoc research query, not a deployed report.
-- `sm-flash-attendance-report.py` — untracked draft found in the repo 2026-08-30, broken and wrong-ministry (queries non-existent tables, CM subject/recipients despite the SM filename). Needs triage before any fix; not related to the script below. See `BACKLOG.md`.
 - `BACKLOG.md` — request and rollout status.
 
 **Related, deliberately separate:** `attendance-count-report/RPC_AttendanceCounts.py` is the church-wide on-demand counts report — any ministry via a live picker, rather than SM/CM hardcoded. It counts `Attend` rows (so it can split Members from Leaders) where these dashboards count `Meetings.NumPresent`, so the two can legitimately disagree when a meeting records a headcount larger than the number of people actually marked. Check which source a report used before filing a discrepancy.

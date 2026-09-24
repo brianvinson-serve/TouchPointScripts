@@ -201,8 +201,6 @@ else:
     # Recap email (or a View=1 preview of it, or an off-day manual run):
     # most recently completed target weekday, never today.
     days_since = (python_weekday - target_weekday) % 7
-    if days_since == 0:
-        days_since = 7
     report_date = datetime.now().date() - timedelta(days=days_since)
 
 comparison_date = report_date - timedelta(days=7)
@@ -243,6 +241,8 @@ FROM dbo.Organizations o
 LEFT JOIN dbo.Meetings m
     ON m.OrganizationId = o.OrganizationId
    AND CAST(m.MeetingDate AS DATE) IN (@ReportDate, @ComparisonDate)
+   AND ISNULL(m.Canceled, 0) = 0
+   AND ISNULL(m.DidNotMeet, 0) = 0
 WHERE o.OrganizationStatusId = @ActiveStatusId
   AND o.OrganizationName NOT IN ({excluded_names})
   {excluded_like_clauses}
@@ -498,10 +498,10 @@ missing_orgs.sort(key=lambda item: (item[0], item[1]))
 def summary_card(label, value, comparison):
     return """
     <tr><td valign="top" style="padding:6px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f1f5f9;border-radius:8px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f3f8fb;border-radius:8px;">
         <tr>
-          <td style="padding:14px 12px;font-family:Arial,sans-serif;font-size:16px;line-height:22px;font-weight:bold;color:#334155;">{label}<div style="padding-top:2px;font-size:12px;line-height:18px;font-weight:normal;color:#64748b;">{comparison}</div></td>
-          <td align="right" width="90" style="padding:14px 12px;font-family:Arial,sans-serif;font-size:30px;line-height:34px;font-weight:bold;color:#12355b;">{value}</td>
+          <td style="padding:14px 12px;font-family:Arial,sans-serif;font-size:16px;line-height:22px;font-weight:bold;color:#55606b;">{label}<div style="padding-top:2px;font-size:12px;line-height:18px;font-weight:normal;color:#6b7683;">{comparison}</div></td>
+          <td align="right" width="90" style="padding:14px 12px;font-family:Arial,sans-serif;font-size:30px;line-height:34px;font-weight:bold;color:#0c2340;">{value}</td>
         </tr>
       </table>
     </td></tr>
@@ -519,16 +519,16 @@ def detail_rows(campus, school_level):
     for key in sorted(grouped):
         html_rows += """
         <tr>
-          <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#334155;">{label}</td>
-          <td align="right" style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;">{value}</td>
+          <td style="padding:9px 12px;border-bottom:1px solid #e3e8ee;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#55606b;">{label}</td>
+          <td align="right" style="padding:9px 12px;border-bottom:1px solid #e3e8ee;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#222;">{value}</td>
         </tr>
         """.format(label=escape_html(key[1]), value=grouped[key])
 
     school_total = total(selected)
     html_rows += """
     <tr>
-      <td style="padding:10px 12px;background:#e8f1fb;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#12355b;">{label} total</td>
-      <td align="right" style="padding:10px 12px;background:#e8f1fb;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#12355b;">{value}</td>
+      <td style="padding:10px 12px;background:#dceefa;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0c2340;">{label} total</td>
+      <td align="right" style="padding:10px 12px;background:#dceefa;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0c2340;">{value}</td>
     </tr>
     """.format(label=school_level, value=school_total)
     return html_rows
@@ -540,61 +540,50 @@ def school_level_block(title, campus, school_level):
         return ""
     return """
     <tr><td style="padding:8px 18px;">
-      <div style="padding:8px 12px;background:#dbeafe;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#12355b;">{title}</div>
+      <div style="padding:8px 12px;background:#dceefa;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#0c2340;">{title}</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{rows}</table>
     </td></tr>
     """.format(title=title, rows=detail_rows(campus, school_level))
 
 
-def campus_section(campus):
+def section_block(label, campus, extra_html):
     students = total_for(report_date_sql, campus, "Students")
     previous_total = total_for(comparison_date_sql, campus, "Students")
     return """
     <tr><td style="padding:24px 18px 8px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <tr>
-          <td style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">{campus}</td>
-          <td align="right" style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">{students}</td>
+          <td style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#0c2340;">{label}</td>
+          <td align="right" style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#0c2340;">{students}</td>
         </tr>
-        <tr><td colspan="2" style="padding-top:3px;font-family:Arial,sans-serif;font-size:14px;line-height:21px;color:#475569;">{students} students &middot; {delta}</td></tr>
+        <tr><td colspan="2" style="padding-top:3px;font-family:Arial,sans-serif;font-size:14px;line-height:21px;color:#55606b;">{students} students &middot; {delta}</td></tr>
       </table>
     </td></tr>
-    {middle_block}
-    {high_block}
+    {extra}
     """.format(
-        campus=campus,
+        label=label,
         students=students,
         delta=delta_text(students, previous_total),
-        middle_block=school_level_block("Middle School", campus, "Middle School"),
-        high_block=school_level_block("High School", campus, "High School"),
+        extra=extra_html,
     )
+
+
+def campus_section(campus):
+    extra = school_level_block("Middle School", campus, "Middle School") + school_level_block(
+        "High School", campus, "High School"
+    )
+    return section_block(campus, campus, extra)
 
 
 def flat_students_section():
     """Wednesday D-Groups: no campus split (org names don't reliably carry
     campus), just Middle School / High School / Other topic groups."""
-    students = total_for(report_date_sql, None, "Students")
-    previous_total = total_for(comparison_date_sql, None, "Students")
-    return """
-    <tr><td style="padding:24px 18px 8px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
-        <tr>
-          <td style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">D-Groups</td>
-          <td align="right" style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">{students}</td>
-        </tr>
-        <tr><td colspan="2" style="padding-top:3px;font-family:Arial,sans-serif;font-size:14px;line-height:21px;color:#475569;">{students} students &middot; {delta}</td></tr>
-      </table>
-    </td></tr>
-    {middle_block}
-    {high_block}
-    {other_block}
-    """.format(
-        students=students,
-        delta=delta_text(students, previous_total),
-        middle_block=school_level_block("Middle School", None, "Middle School"),
-        high_block=school_level_block("High School", None, "High School"),
-        other_block=school_level_block("Other D-Groups", None, "Other"),
+    extra = (
+        school_level_block("Middle School", None, "Middle School")
+        + school_level_block("High School", None, "High School")
+        + school_level_block("Other D-Groups", None, "Other")
     )
+    return section_block("D-Groups", None, extra)
 
 
 def leader_rows():
@@ -607,26 +596,22 @@ def leader_rows():
     for name in cfg["leader_org_names"]:
         html_rows += """
         <tr>
-          <td style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#334155;">{name}</td>
-          <td align="right" style="padding:10px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;">{value}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #e3e8ee;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#55606b;">{name}</td>
+          <td align="right" style="padding:10px 12px;border-bottom:1px solid #e3e8ee;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#222;">{value}</td>
         </tr>
         """.format(name=escape_html(name), value=grouped.get(name, 0))
     return html_rows
 
 
 dashboard_url = (
-    model.CmsHost
-    + "/PyScript/"
-    + DASHBOARD_SCRIPT_NAME
-    + "?StartDate="
-    + report_date_sql
-    + "&EndDate="
-    + report_date_sql
-    + "&IncludeSunday="
-    + cfg["dashboard_include_sunday"]
-    + "&IncludeWednesday="
-    + cfg["dashboard_include_wednesday"]
-    + "&CampusFilter=ALL"
+    "{host}/PyScript/{script}?StartDate={date}&EndDate={date}"
+    "&IncludeSunday={sunday}&IncludeWednesday={wednesday}&CampusFilter=ALL"
+).format(
+    host=model.CmsHost,
+    script=DASHBOARD_SCRIPT_NAME,
+    date=report_date_sql,
+    sunday=cfg["dashboard_include_sunday"],
+    wednesday=cfg["dashboard_include_wednesday"],
 )
 
 missing_warning = ""
@@ -637,8 +622,8 @@ if missing_orgs:
     )
     missing_warning = """
     <tr><td style="padding:18px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;">
-        <tr><td style="padding:14px 16px;font-family:Arial,sans-serif;font-size:15px;line-height:22px;color:#7c2d12;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff8e1;border:1px solid #FFD242;border-radius:8px;">
+        <tr><td style="padding:14px 16px;font-family:Arial,sans-serif;font-size:15px;line-height:22px;color:#6b5600;">
           <strong>Attendance may be incomplete.</strong><br>
           No meeting was reported for {count} active {group_word_label} {group_word}:
           <ul style="margin:8px 0 0;padding-left:20px;">{items}</ul>
@@ -658,14 +643,14 @@ else:
     campus_sections_html = flat_students_section()
 
 body = """
-<div style="margin:0;padding:0;background:#eef2f7;">
+<div style="margin:0;padding:0;background:#f3f8fb;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">{students} students &middot; {leaders} leaders &middot; {title}</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#eef2f7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f3f8fb;">
     <tr><td align="center" style="padding:16px 8px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:640px;background:#ffffff;border-radius:10px;overflow:hidden;">
-        <tr><td style="padding:22px 18px;background:#12355b;font-family:Arial,sans-serif;color:#ffffff;">
+        <tr><td style="padding:22px 18px;background:#0c2340;font-family:Arial,sans-serif;color:#ffffff;">
           <div style="font-size:24px;line-height:30px;font-weight:bold;">{title}</div>
-          <div style="padding-top:4px;font-size:15px;line-height:22px;color:#dbeafe;">{date_label}</div>
+          <div style="padding-top:4px;font-size:15px;line-height:22px;color:#dceefa;">{date_label}</div>
         </td></tr>
         <tr><td style="padding:12px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -677,14 +662,14 @@ body = """
         {missing_warning}
         {campus_sections}
         <tr><td style="padding:8px 18px 18px;">
-          <div style="padding:8px 12px;background:#fef3c7;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#78350f;">{leader_section_label}</div>
+          <div style="padding:8px 12px;background:#fff7d6;border-bottom:2px solid #FFD242;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#0c2340;">{leader_section_label}</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
             {leader_rows}
           </table>
         </td></tr>
         <tr><td align="center" style="padding:20px 18px 26px;">
-          <a href="{dashboard_url}" style="display:inline-block;padding:13px 20px;background:#2563eb;border-radius:6px;font-family:Arial,sans-serif;font-size:16px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;">View interactive attendance report</a>
-          <div style="padding-top:16px;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">{footer_text}</div>
+          <a href="{dashboard_url}" style="display:inline-block;padding:13px 20px;background:#1d6a94;border-radius:6px;font-family:Arial,sans-serif;font-size:16px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;">View interactive attendance report</a>
+          <div style="padding-top:16px;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#6b7683;">{footer_text}</div>
         </td></tr>
       </table>
     </td></tr>
@@ -736,9 +721,9 @@ if action == "SEND":
     print("<p>{} report queued for {} recipient(s).</p>".format(cfg["subject_prefix"], len(recipient_people_ids)))
 else:
     if is_live_checkin_day:
-        banner = "<p style=\"font-family:Arial,sans-serif;color:#0f766e;\"><strong>LIVE VIEW</strong> -- {}. No email is sent from this page.</p>".format(escape_html(report_date_label))
+        banner = "<p style=\"font-family:Arial,sans-serif;color:#1d6a94;\"><strong>LIVE VIEW</strong> -- {}. No email is sent from this page.</p>".format(escape_html(report_date_label))
     else:
-        banner = "<p style=\"font-family:Arial,sans-serif;color:#b45309;\"><strong>PREVIEW MODE</strong> -- no email sent (View=1). Would send to {} recipient(s) as: {}</p>".format(
+        banner = "<p style=\"font-family:Arial,sans-serif;color:#6b5600;\"><strong>PREVIEW MODE</strong> -- no email sent (View=1). Would send to {} recipient(s) as: {}</p>".format(
             len(recipient_people_ids), escape_html(subject)
         )
     print(banner + body)

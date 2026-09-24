@@ -99,6 +99,11 @@ import re
 # URL (pre-fills that input on GET).
 LOOKBACK_DAYS = 120
 
+# Upper bound on the user-supplied Days input, so a typo (e.g. an extra
+# zero) can't build a DATEADD() call SQL Server chokes on or force the
+# blocking query over a huge chunk of the People table.
+MAX_LOOKBACK_DAYS = 3650
+
 # Safety cap on how many recent records get fuzzy-matched in one Full scan.
 # If RPC's live People table makes this slow, lower this first.
 MAX_RECENT_ROWS = 500
@@ -251,10 +256,15 @@ NICKNAME_CLUSTERS = [
     {"veronica", "ronnie", "roni"},
 ]
 
+# A handful of names appear in more than one cluster (e.g. "ronnie" is both
+# a Ronald and a Veronica nickname, "chris" is both Christopher and
+# Christina/Christine) -- map each name to the SET of clusters it belongs
+# to, not a single id, so those shared nicknames still match either full
+# name instead of a dict-overwrite silently keeping only the last one.
 NICKNAME_CLUSTER_INDEX = {}
 for _cluster_id, _cluster in enumerate(NICKNAME_CLUSTERS):
     for _name in _cluster:
-        NICKNAME_CLUSTER_INDEX[_name] = _cluster_id
+        NICKNAME_CLUSTER_INDEX.setdefault(_name, set()).add(_cluster_id)
 
 
 # ============================================================
@@ -274,6 +284,13 @@ def to_int(value, default=None):
         return int(str(value).strip())
     except (TypeError, ValueError):
         return default
+
+
+def clamp_days(value):
+    days = to_int(value, LOOKBACK_DAYS)
+    if days <= 0:
+        return LOOKBACK_DAYS
+    return min(days, MAX_LOOKBACK_DAYS)
 
 
 def norm_str(value):
@@ -323,9 +340,9 @@ def first_name_score(names_a, names_b):
             if a == b:
                 best = max(best, 1.0)
                 continue
-            cluster_a = NICKNAME_CLUSTER_INDEX.get(a)
-            cluster_b = NICKNAME_CLUSTER_INDEX.get(b)
-            if cluster_a is not None and cluster_a == cluster_b:
+            clusters_a = NICKNAME_CLUSTER_INDEX.get(a)
+            clusters_b = NICKNAME_CLUSTER_INDEX.get(b)
+            if clusters_a and clusters_b and clusters_a & clusters_b:
                 best = max(best, 0.9)
                 continue
             best = max(best, string_ratio(a, b) * 0.75)
@@ -546,22 +563,22 @@ def cap_per_recent_person(rows):
     return capped
 
 
+def build_pair_row_html(row, cms_host):
+    return (
+        "<tr><td>{recent_link}</td><td>{cand_link}</td>"
+        "<td class=\"score\">{score}</td><td>{badges}</td></tr>".format(
+            recent_link=person_link(cms_host, row["recent"]),
+            cand_link=person_link(cms_host, row["candidate"]),
+            score=row["score"],
+            badges=signal_badges(row["signals"]) or "&mdash;",
+        )
+    )
+
+
 def build_tier_html(tier_name, rows, cms_host):
     if not rows:
         return ""
-    body_rows = []
-    for row in rows:
-        recent_p = row["recent"]
-        cand_p = row["candidate"]
-        body_rows.append(
-            "<tr><td>{recent_link}</td><td>{cand_link}</td>"
-            "<td class=\"score\">{score}</td><td>{badges}</td></tr>".format(
-                recent_link=person_link(cms_host, recent_p),
-                cand_link=person_link(cms_host, cand_p),
-                score=row["score"],
-                badges=signal_badges(row["signals"]) or "&mdash;",
-            )
-        )
+    body_rows = [build_pair_row_html(row, cms_host) for row in rows]
     return """
 <div class="tier tier-{tier_class}">
   <h2>{tier_name} confidence <span class="count">({count})</span></h2>
@@ -581,19 +598,7 @@ def build_tier_html(tier_name, rows, cms_host):
 def build_household_gap_html(rows, cms_host):
     if not rows:
         return ""
-    body_rows = []
-    for row in rows:
-        recent_p = row["recent"]
-        cand_p = row["candidate"]
-        body_rows.append(
-            "<tr><td>{recent_link}</td><td>{cand_link}</td>"
-            "<td class=\"score\">{score}</td><td>{badges}</td></tr>".format(
-                recent_link=person_link(cms_host, recent_p),
-                cand_link=person_link(cms_host, cand_p),
-                score=row["score"],
-                badges=signal_badges(row["signals"]) or "&mdash;",
-            )
-        )
+    body_rows = [build_pair_row_html(row, cms_host) for row in rows]
     return """
 <div class="tier tier-household">
   <h2>Household link to verify <span class="count">({count})</span></h2>
@@ -965,12 +970,10 @@ def build_legend_html():
 def main():
     if model.HttpMethod == "post":
         action = str(getattr(model.Data, "action", "") or "")
-    
+
         if action == "count":
             try:
-                days = to_int(getattr(model.Data, "days", ""), LOOKBACK_DAYS)
-                if days <= 0:
-                    days = LOOKBACK_DAYS
+                days = clamp_days(getattr(model.Data, "days", ""))
                 print(json.dumps({
                     "success": True,
                     "recent_count": count_recent(days),
@@ -978,7 +981,7 @@ def main():
                 }))
             except Exception as e:
                 print(json.dumps({"success": False, "message": str(e)}))
-    
+
         elif action == "scan":
             try:
                 mode = str(getattr(model.Data, "mode", "") or "full")
@@ -987,29 +990,25 @@ def main():
                     max_recent = QUICK_SCAN_MAX_ROWS
                 else:
                     mode = "full"
-                    lookback_days = to_int(getattr(model.Data, "days", ""), LOOKBACK_DAYS)
-                    if lookback_days <= 0:
-                        lookback_days = LOOKBACK_DAYS
+                    lookback_days = clamp_days(getattr(model.Data, "days", ""))
                     max_recent = MAX_RECENT_ROWS
-    
+
                 result = run_scan(lookback_days, max_recent)
                 result["success"] = True
                 result["mode"] = mode
                 print(json.dumps(result))
             except Exception as e:
                 print(json.dumps({"success": False, "message": str(e)}))
-    
+
         else:
             print(json.dumps({"success": False, "message": "Unknown action: " + action}))
-    
+
     # ============================================================
     # HTML SHELL (GET) -- renders instantly, no heavy query runs here
     # ============================================================
     else:
-        initial_days = to_int(getattr(model.Data, "Days", ""), LOOKBACK_DAYS)
-        if initial_days <= 0:
-            initial_days = LOOKBACK_DAYS
-    
+        initial_days = clamp_days(getattr(model.Data, "Days", ""))
+
         print(
             """<!DOCTYPE html>
     <html lang="en">
@@ -1035,15 +1034,23 @@ def main():
         --medium: #3f7cc9;
         --low: #7c8a9a;
         --household: #0f766e;
-        --accent: #0b5fa5;
+        --accent: #0C2340;
       }}
       * {{ box-sizing: border-box; }}
       body {{
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         margin: 24px; color: var(--ink); background: #fff; line-height: 1.45;
       }}
-      h1 {{ font-size: 21px; margin: 0 0 4px; font-weight: 600; }}
+      /* Header/title/buttons carry the RPC brand (navy + yellow accent);
+         the badge/tier palette below stays its own semantic colors on
+         purpose -- see the portability note at the top of this file. */
+      .dup-bar {{
+        background: #0C2340; border-bottom: 4px solid #FFD242;
+        margin: -24px -24px 20px; padding: 20px 24px 16px; color: #fff;
+      }}
+      h1 {{ font-size: 21px; margin: 0 0 4px; font-weight: 600; color: #fff; }}
       h2 {{ font-size: 15px; margin: 0 0 4px; font-weight: 600; color: var(--ink); }}
+      .dup-bar .meta {{ color: rgba(255,255,255,0.72); margin-bottom: 0; }}
       .meta {{ color: var(--ink-muted); font-size: 13px; margin: 0 0 16px; max-width: 900px; }}
       .count {{ font-weight: 400; color: var(--ink-muted); font-size: 12px; }}
       .empty {{ color: var(--ink-muted); }}
@@ -1144,13 +1151,15 @@ def main():
     </style>
     </head>
     <body>
-    <h1>Possible Duplicate People</h1>
-    <p class="meta">
-      Fuzzy-matches recently created People records against the People table to catch nickname/typo
-      duplicates TouchPoint's native Duplicates finder misses. Pairs already tracked there are excluded.
-      Read-only &mdash; merge records using TouchPoint's own Admin merge tool, not here.
-    </p>
-    
+    <div class="dup-bar">
+      <h1>Possible Duplicate People</h1>
+      <p class="meta">
+        Fuzzy-matches recently created People records against the People table to catch nickname/typo
+        duplicates TouchPoint's native Duplicates finder misses. Pairs already tracked there are excluded.
+        Read-only &mdash; merge records using TouchPoint's own Admin merge tool, not here.
+      </p>
+    </div>
+
     <div class="stat-row">
       <div class="stat-tile"><div class="stat-label">Recently created</div><div class="stat-value" id="stat-recent">&hellip;</div></div>
       <div class="stat-tile stat-high"><div class="stat-label">High confidence</div><div class="stat-value" id="stat-high">&mdash;</div></div>

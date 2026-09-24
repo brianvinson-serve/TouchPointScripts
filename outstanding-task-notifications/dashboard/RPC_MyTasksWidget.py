@@ -183,7 +183,7 @@ print("""
 ))
 
 if total_open == 0:
-    print('<div class="box-content" style="padding:10px 14px;color:#94a3b8;">Nothing outstanding right now.</div>')
+    print('<div class="box-content" style="padding:10px 14px;color:#8a949e;">Nothing outstanding right now.</div>')
 else:
     print('<ul class="list-group bordered">')
     for t in top_tasks:
@@ -199,19 +199,19 @@ else:
         print("""
         <li class="list-group-item" style="border-left:4px solid {border}; padding-left:10px;">
             <div style="font-weight:700; font-size:13px;">{about}</div>
-            <div style="font-size:12px; color:#334155;">{snippet}</div>
+            <div style="font-size:12px; color:#55606b;">{snippet}</div>
             <div style="font-size:11px; color:{border}; font-weight:700;">{age}</div>
         </li>
         """.format(border=border_hex, about=about_html, snippet=snippet, age=html_escape(age_label)))
     print("</ul>")
 
     if remaining_count > 0:
-        print('<div style="padding:6px 14px; font-size:12px; color:#627d98;">+ {} more open task{}</div>'.format(
+        print('<div style="padding:6px 14px; font-size:12px; color:#6b7683;">+ {} more open task{}</div>'.format(
             remaining_count, "" if remaining_count == 1 else "s"
         ))
 
 print("""
-    <div style="padding:8px 14px; border-top:1px solid #e5e7eb;">
+    <div style="padding:8px 14px; border-top:1px solid #D1D3D4;">
         <a href="{url}" style="font-size:12px; font-weight:700;">View my full task board &rarr;</a>
     </div>
     </div>

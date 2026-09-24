@@ -146,6 +146,8 @@ CROSS APPLY (
 JOIN dbo.Meetings m
     ON  m.OrganizationId = o.OrganizationId
     AND CAST(m.MeetingDate AS DATE) BETWEEN @StartDate AND @EndDate
+    AND ISNULL(m.Canceled, 0) = 0
+    AND ISNULL(m.DidNotMeet, 0) = 0
 
 WHERE
     o.OrganizationStatusId = 30
@@ -258,8 +260,8 @@ print(
 <title>SM Attendance Dashboard</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#f0f4f8;color:#1a202c;font-size:13px;line-height:1.5}
-.topbar{background:#1a365d;color:white;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#f3f8fb;color:#1a202c;font-size:13px;line-height:1.5}
+.topbar{background:#0c2340;color:white;padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.25)}
 .topbar h1{font-size:15px;font-weight:700;letter-spacing:.3px}
 .topbar-right{display:flex;gap:8px;align-items:center}
 .topbar small{color:rgba(255,255,255,.55);font-size:11px;margin-left:12px}
@@ -273,24 +275,24 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,san
 .btn-group{display:flex;border-radius:5px;overflow:hidden;border:1px solid #e2e8f0}
 .btn-toggle{padding:4px 10px;border:none;background:white;color:#4a5568;font-size:11px;font-weight:500;cursor:pointer;border-right:1px solid #e2e8f0;transition:background .12s,color .12s;white-space:nowrap}
 .btn-toggle:last-child{border-right:none}
-.btn-toggle.active{background:#2b6cb0;color:white;font-weight:700}
-.btn-toggle:hover:not(.active):not(:disabled){background:#ebf8ff}
+.btn-toggle.active{background:#1d6a94;color:white;font-weight:700}
+.btn-toggle:hover:not(.active):not(:disabled){background:#f3f8fb}
 .btn-toggle:disabled{color:#cbd5e0;cursor:default}
 .date-row{display:flex;gap:6px;align-items:center}
 .date-row input[type="date"]{padding:3px 7px;border:1px solid #e2e8f0;border-radius:4px;font-size:11px;color:#2d3748}
 .date-sep{color:#a0aec0;font-size:11px}
-.stats-bar{display:flex;gap:24px;padding:9px 24px;background:#ebf8ff;border-bottom:1px solid #bee3f8;flex-wrap:wrap;align-items:center}
+.stats-bar{display:flex;gap:24px;padding:9px 24px;background:#f3f8fb;border-bottom:1px solid #dceefa;flex-wrap:wrap;align-items:center}
 .stat{display:flex;flex-direction:column}
-.stat-val{font-size:19px;font-weight:800;color:#2b6cb0;line-height:1.1}
+.stat-val{font-size:19px;font-weight:800;color:#1d6a94;line-height:1.1}
 .stat-lbl{font-size:10px;color:#4a5568;text-transform:uppercase;letter-spacing:.4px;margin-top:1px}
-.stat-range{font-size:12px;font-weight:600;color:#2b6cb0}
+.stat-range{font-size:12px;font-weight:600;color:#1d6a94}
 .table-section{padding:16px 24px}
 .table-wrapper{overflow-x:auto;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.1)}
 table{border-collapse:collapse;width:100%;background:white}
-thead th{background:#1a365d;color:white;padding:7px 10px;font-size:11px;font-weight:600;text-align:right;white-space:nowrap}
-thead th.col-label{text-align:left;min-width:210px;background:#12263f}
-thead th.col-total{background:#163155}
-thead th.col-avg{background:#163155;color:rgba(255,255,255,.75)}
+thead th{background:#0c2340;color:white;padding:7px 10px;font-size:11px;font-weight:600;text-align:right;white-space:nowrap}
+thead th.col-label{text-align:left;min-width:210px;background:#0c2340}
+thead th.col-total{background:#183d5f}
+thead th.col-avg{background:#183d5f;color:rgba(255,255,255,.75)}
 td{padding:4px 10px;border-bottom:1px solid #edf2f7;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 td.col-label{text-align:left}
 td.col-total{font-weight:600}
@@ -301,21 +303,24 @@ td.col-avg{color:#718096}
    r-total = that group's subtotal, r-leaf = a detail row, r-grand = the section's
    final rollup. Depth (d1/d2/d3) controls indentation only, independent of kind,
    so every section shares the same visual language regardless of its shape. */
-tr.r-top td{background:#1e293b;color:white;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-top:4px solid #e2e8f0}
+tr.r-top td{background:#0c2340;color:white;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:7px 10px;border-top:4px solid #e2e8f0}
 tr.r-top td.col-label{padding-left:10px}
+tr.r-top.vol td{background:#fff7d6;color:#0c2340;border-top:4px solid #ffd242}
 tr.r-node td{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding:6px 10px}
 tr.d1.r-node td{background:#e2e8f0}
-tr.d2.r-node td{background:#eef2f6}
-tr.r-total td{background:#dbeafe;font-weight:700;border-top:1px solid #bfdbfe;border-bottom:1px solid #bfdbfe}
+tr.d2.r-node td{background:#f3f8fb}
+tr.r-node.vol td{background:#fff7d6}
+tr.r-total td{background:#dceefa;font-weight:700;border-top:1px solid #dceefa;border-bottom:1px solid #dceefa}
+tr.r-total.vol td{background:#fff7d6;border-top:1px solid #ffd242;border-bottom:1px solid #ffd242}
 tr.r-leaf td{background:white;color:#2d3748}
 tr.r-leaf-alt td{background:#fafafa;color:#718096;font-style:italic}
 tr.d1 td.col-label{padding-left:14px}
 tr.d2 td.col-label{padding-left:22px}
 tr.d3 td.col-label{padding-left:36px}
-tr.r-grand td{background:#1a365d;color:white;font-weight:700;font-size:13px;padding:8px 10px;border-top:2px solid #2b6cb0}
+tr.r-grand td{background:#0c2340;color:white;font-weight:700;font-size:13px;padding:8px 10px;border-top:2px solid #1d6a94}
 tr.r-grand td.col-label{padding-left:10px}
 tr.r-grand td.col-avg{color:rgba(255,255,255,.65)}
-tr.r-spacer td{height:6px;background:#f0f4f8;border:none}
+tr.r-spacer td{height:6px;background:#f3f8fb;border:none}
 .empty-state{padding:60px;text-align:center;color:#a0aec0;background:white}
 .empty-state p{margin-top:8px;font-size:12px}
 </style>
@@ -549,8 +554,13 @@ function buildRows(data,dates,n) {
     var subset=data.filter(function(r){return r.PersonType===cfg.personType && r.Category===cfg.category;});
     if(!subset.length) return;
 
+    // Volunteer sections get the yellow brand accent (vs. blue for
+    // attendees/students) on their header, grouping, and subtotal rows --
+    // same convention as cm-attendance-pyreport.py's r-vol-* classes.
+    var volClass=cfg.personType==='Volunteers'?' vol':'';
+
     if(rows.length) rows.push({type:'spacer'});
-    rows.push(mk('top',cfg.label,subset,dates,n));
+    rows.push(mk('top'+volClass,cfg.label,subset,dates,n));
 
     var hasCampus=cfg.levels.indexOf('campus')>=0;
     var hasSchool=cfg.levels.indexOf('school')>=0;
@@ -562,7 +572,7 @@ function buildRows(data,dates,n) {
       var groupKey=topGroups[gi];
       var gd=hasCampus ? subset.filter(function(r){return r.Campus===groupKey;}) : subset;
       if(!gd.length) continue;
-      if(hasCampus) rows.push(mk('node d1',groupKey,gd,dates,n));
+      if(hasCampus) rows.push(mk('node d1'+volClass,groupKey,gd,dates,n));
 
       if(hasSchool){
         var sls=['Middle School','High School'];
@@ -600,7 +610,7 @@ function buildRows(data,dates,n) {
         }
       }
 
-      if(hasCampus) rows.push(mk('total d1',groupKey+' Total',gd,dates,n));
+      if(hasCampus) rows.push(mk('total d1'+volClass,groupKey+' Total',gd,dates,n));
     }
 
     var showGrand=hasCampus

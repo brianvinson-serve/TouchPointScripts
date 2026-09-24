@@ -229,35 +229,35 @@ forgotten_open = sum(1 for t in tasks if t["status_id"] in (2, 3) and t["age_buc
 print("""
 <style>
 .rpc-my-board {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1f2933; }}
-.rpc-my-board .hero {{ background: #12355b; color: white; border-radius: 12px; padding: 20px 26px; margin-bottom: 16px; }}
+.rpc-my-board .hero {{ background: #0C2340; color: white; border-radius: 12px; padding: 20px 26px; margin-bottom: 16px; border-bottom: 4px solid #FFD242; }}
 .rpc-my-board .hero h1 {{ margin: 0 0 6px 0; font-size: 26px; }}
 .rpc-my-board .hero p {{ margin: 0; opacity: .9; }}
 .rpc-my-board .cards {{ display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }}
-.rpc-my-board .card {{ flex: 1; min-width: 150px; background: #f7fafc; border: 1px solid #d9e2ec; border-radius: 10px; padding: 12px 14px; }}
+.rpc-my-board .card {{ flex: 1; min-width: 150px; background: #f7f9fb; border: 1px solid #D1D3D4; border-radius: 10px; padding: 12px 14px; }}
 .rpc-my-board .card.warn {{ background: #fff5f5; border-color: #fca5a5; }}
 .rpc-my-board .metric {{ font-size: 26px; font-weight: 800; line-height: 1; }}
-.rpc-my-board .label {{ color: #52606d; font-size: 12px; margin-top: 4px; }}
-.rpc-my-board .banner {{ background: #fffbeb; border: 1px solid #fbbf24; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; }}
-.rpc-my-board .banner.info {{ background: #eff6ff; border-color: #93c5fd; }}
+.rpc-my-board .label {{ color: #55606b; font-size: 12px; margin-top: 4px; }}
+.rpc-my-board .banner {{ background: #fff8e1; border: 1px solid #FFD242; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 14px; color: #6b5600; }}
+.rpc-my-board .banner.info {{ background: #dceefa; border-color: #76C2E3; color: #183D5F; }}
 .rpc-my-board .board {{ display: flex; gap: 14px; overflow-x: auto; padding-bottom: 8px; align-items: flex-start; }}
 .rpc-my-board .column {{ flex: 0 0 280px; background: #eef2f6; border-radius: 10px; padding: 10px; }}
-.rpc-my-board .column-header {{ display: flex; justify-content: space-between; align-items: center; padding: 4px 6px 10px 6px; font-weight: 700; font-size: 14px; color: #243b53; }}
-.rpc-my-board .column-count {{ background: #d9e2ec; color: #243b53; border-radius: 999px; padding: 1px 9px; font-size: 12px; }}
+.rpc-my-board .column-header {{ display: flex; justify-content: space-between; align-items: center; padding: 4px 6px 10px 6px; font-weight: 700; font-size: 14px; color: #183D5F; }}
+.rpc-my-board .column-count {{ background: #D1D3D4; color: #183D5F; border-radius: 999px; padding: 1px 9px; font-size: 12px; }}
 .rpc-my-board .task-card {{ background: white; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; box-shadow: 0 1px 2px rgba(0,0,0,0.08); border-left: 5px solid #cbd5e1; }}
 .rpc-my-board .task-card .badges {{ display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }}
 .rpc-my-board .task-card .about {{ font-weight: 700; font-size: 13px; margin-bottom: 4px; }}
-.rpc-my-board .task-card .about a {{ color: #12355b; text-decoration: none; }}
-.rpc-my-board .task-card .body {{ font-size: 13px; color: #334155; margin-bottom: 6px; max-height: 4.5em; overflow: hidden; }}
-.rpc-my-board .task-card .keyword-chip {{ display: inline-block; background: #eef2ff; color: #3730a3; border-radius: 6px; padding: 2px 7px; font-size: 11px; margin: 1px 3px 1px 0; }}
-.rpc-my-board .task-card .open-link {{ font-size: 12px; font-weight: 700; color: #0b6bcb; text-decoration: none; }}
+.rpc-my-board .task-card .about a {{ color: #0C2340; text-decoration: none; }}
+.rpc-my-board .task-card .body {{ font-size: 13px; color: #55606b; margin-bottom: 6px; max-height: 4.5em; overflow: hidden; }}
+.rpc-my-board .task-card .keyword-chip {{ display: inline-block; background: #dceefa; color: #1D6A94; border-radius: 6px; padding: 2px 7px; font-size: 11px; margin: 1px 3px 1px 0; }}
+.rpc-my-board .task-card .open-link {{ font-size: 12px; font-weight: 700; color: #1D6A94; text-decoration: none; }}
 .rpc-my-board .pill {{ display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; white-space: nowrap; }}
 .rpc-my-board .pill.red {{ background: #fde2e2; color: #b42318; }}
 .rpc-my-board .pill.orange {{ background: #ffedd5; color: #9a3412; }}
 .rpc-my-board .pill.yellow {{ background: #fff3bf; color: #7c5e10; }}
 .rpc-my-board .pill.blue {{ background: #dbeafe; color: #1d4ed8; }}
 .rpc-my-board .pill.gray {{ background: #e5e7eb; color: #374151; }}
-.rpc-my-board .empty-column {{ color: #94a3b8; font-size: 12px; text-align: center; padding: 18px 6px; }}
-.rpc-my-board .muted {{ color: #627d98; }}
+.rpc-my-board .empty-column {{ color: #8a949e; font-size: 12px; text-align: center; padding: 18px 6px; }}
+.rpc-my-board .muted {{ color: #6b7683; }}
 </style>
 <div class="rpc-my-board">
   <div class="hero">

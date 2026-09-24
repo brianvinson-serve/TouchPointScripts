@@ -66,11 +66,11 @@ for task in q.QuerySql(taskSql):
         borderColor = "#e74c3c"  # Red for overdue
         urgencyBadge = '<span style="background:#e74c3c;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">OVERDUE - {} days</span>'.format(daysOld)
     else:
-        borderColor = "#3498db"  # Blue for normal
-        urgencyBadge = '<span style="background:#3498db;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">{} days old</span>'.format(daysOld)
+        borderColor = "#1D6A94"  # RPC Curious Blue for normal
+        urgencyBadge = '<span style="background:#1D6A94;color:white;padding:2px 8px;border-radius:4px;font-size:12px;">{} days old</span>'.format(daysOld)
 
     print("""
-    <div style="border: 2px solid {7}; margin: 1.5em 0; padding: 1.5em; border-radius: 8px; background: #f9f9f9;">
+    <div style="border: 2px solid {7}; margin: 1.5em 0; padding: 1.5em; border-radius: 8px; background: #f7f9fb;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em;">
             <strong style="font-size: 1.1em;">Follow up with {0}</strong>
             {9}
@@ -89,8 +89,8 @@ for task in q.QuerySql(taskSql):
         </div>
 
         <div style="margin-top: 1em;">
-            <a href="{3}/Person2/{4}#tab-touchpoints" style="background: #27ae60; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; margin-right: 8px;">View Profile</a>
-            <a href="{3}/Task/List" style="background: #3498db; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px;">My Task List</a>
+            <a href="{3}/Person2/{4}#tab-touchpoints" style="background: #0C2340; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px; margin-right: 8px;">View Profile</a>
+            <a href="{3}/Task/List" style="background: #1D6A94; color: white; padding: 8px 16px; text-decoration: none; border-radius: 4px;">My Task List</a>
         </div>
     </div>
     """.format(

@@ -36,7 +36,10 @@ QUEUED_BY = 23164  # Max McCalley; confirmed live PeopleId
 
 # Confirmed SM staff PeopleIds; keep synchronized with DB_REFERENCE.md and
 # SM_TaskNote-ToDo.sql. Used only when TEST_STAFF is empty.
-SM_STAFF = [46965, 659, 284, 23164, 1675, 40594, 36696, 28000, 19570, 118]
+# 19570 (Weston Watts) removed 2026-09-23 -- confirmed off staff 2026-08-26,
+# already removed from SM_StaffTaskDigestEmail.py's SM_STAFF on 2026-08-31;
+# this list had drifted out of sync with that fix.
+SM_STAFF = [46965, 659, 284, 23164, 1675, 40594, 36696, 28000, 118]
 
 # ============================================================
 # DATA QUERIES
@@ -118,14 +121,14 @@ for staffId in staffList:
                 'border-radius:4px;font-size:12px;">OVERDUE - {} days</span>'
             ).format(daysOld)
         else:
-            borderColor = "#3498db"
+            borderColor = "#1D6A94"
             urgencyBadge = (
-                '<span style="background:#3498db;color:white;padding:2px 8px;'
+                '<span style="background:#1D6A94;color:white;padding:2px 8px;'
                 'border-radius:4px;font-size:12px;">{} days old</span>'
             ).format(daysOld)
 
         taskBlocks += """
-        <div style="border:2px solid {border};margin:1.5em 0;padding:1.5em;border-radius:8px;background:#f9f9f9;">
+        <div style="border:2px solid {border};margin:1.5em 0;padding:1.5em;border-radius:8px;background:#f7f9fb;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1em;">
                 <strong style="font-size:1.1em;">Follow up with {about_name}</strong>
                 {badge}
@@ -141,8 +144,8 @@ for staffId in staffList:
                 <strong>Task Details:</strong><br>{instructions}
             </div>
             <div style="margin-top:1em;">
-                <a href="{host}/Person2/{about_id}#tab-touchpoints" style="background:#27ae60;color:white;padding:8px 16px;text-decoration:none;border-radius:4px;margin-right:8px;">View Profile</a>
-                <a href="{host}/Task/List" style="background:#3498db;color:white;padding:8px 16px;text-decoration:none;border-radius:4px;">My Task List</a>
+                <a href="{host}/Person2/{about_id}#tab-touchpoints" style="background:#0C2340;color:white;padding:8px 16px;text-decoration:none;border-radius:4px;margin-right:8px;">View Profile</a>
+                <a href="{host}/Task/List" style="background:#1D6A94;color:white;padding:8px 16px;text-decoration:none;border-radius:4px;">My Task List</a>
             </div>
         </div>
         """.format(
@@ -159,24 +162,35 @@ for staffId in staffList:
         )
 
     body = """
-    <div style="font-family:Arial,Helvetica,sans-serif;max-width:760px;margin:0 auto;color:#222;">
+    <div style="margin:0;padding:0;background:#f7f9fb;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f7f9fb;">
+        <tr><td align="center" style="padding:16px 8px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:760px;background:#ffffff;border-radius:10px;overflow:hidden;">
+            <tr><td style="padding:22px 18px;background:#0C2340;border-bottom:4px solid #FFD242;font-family:Arial,sans-serif;color:#ffffff;">
+              <div style="font-size:22px;line-height:28px;font-weight:bold;">Your Outstanding Tasks</div>
+            </td></tr>
+            <tr><td style="padding:18px;font-family:Arial,Helvetica,sans-serif;color:#222;">
         <p>Hi {name},</p>
         <p>You have <strong>{count}</strong> outstanding Student Ministry {task_word} in TouchPoint that {need_word} your attention.</p>
-        <h2 style="color:#2c3e50;">Why this matters</h2>
+        <h2 style="color:#0C2340;">Why this matters</h2>
         <p>Each task represents a student or family waiting for someone to follow up. Only one person is assigned to each task at a time, so please complete it or reassign it promptly.</p>
-        <h2 style="color:#2c3e50;">Your outstanding tasks</h2>
+        <h2 style="color:#0C2340;">Your outstanding tasks</h2>
         {tasks}
-        <h2 style="color:#2c3e50;">What to do</h2>
+        <h2 style="color:#0C2340;">What to do</h2>
         <ol>
             <li>Review the task details and person information.</li>
             <li>Take the appropriate follow-up action.</li>
             <li>Mark the task complete in TouchPoint when finished.</li>
             <li>Reassign it if someone else should handle it.</li>
         </ol>
-        <p><a href="{host}/Task/List" style="display:inline-block;background:#3498db;color:white;padding:10px 18px;text-decoration:none;border-radius:4px;">Open My Task List</a></p>
-        <hr style="border:0;border-top:1px solid #ddd;margin:24px 0;">
+        <p><a href="{host}/Task/List" style="display:inline-block;background:#1D6A94;color:white;padding:10px 18px;text-decoration:none;border-radius:4px;">Open My Task List</a></p>
+        <hr style="border:0;border-top:1px solid #D1D3D4;margin:24px 0;">
         <p>Questions? Reply to this email or contact the Student Ministry team.</p>
         <p><strong>RockPointe Student Ministry</strong><br>rockpointechurch.org</p>
+            </td></tr>
+          </table>
+        </td></tr>
+      </table>
     </div>
     """.format(
         name=staffRow.GoesBy,

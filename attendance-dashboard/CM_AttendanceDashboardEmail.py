@@ -66,20 +66,11 @@
 #   rather than by name-keyword match; see @PS830VolunteersSchedulerOrgId
 #   below and classify_volunteer_bucket() below.
 #
-# RECIPIENTS -- STATUS AS OF 2026-08-30:
-# Angela Cheshire and Jennifer Schmitz (the two people Marlene originally
-# asked to confirm involvement scope) are both included in Brian's 2026-08-30
-# 14-name recipient list, taken as their sign-off. PeopleIds resolved via
-# attendance-dashboard/CM_AttendanceEmailRecipientLookup.sql (13 of 14 direct
-# name matches; Jen Schmitz matched by email to the existing Jennifer Schmitz
-# PeopleId 6523 already used here, since her TouchPoint FirstName is
-# "Jennifer" not "Jen"). Sara Comer's TouchPoint record has a personal Gmail
-# address on file, not an rpcstaff.org address like the rest of the list --
-# confirmed correct-person via name match, not re-verified as intentional.
-#
-# PREVIEW_MODE flipped to False 2026-08-30 on Brian's go-ahead -- this script
-# now sends for real when run. Add the MorningBatch call below to schedule it
-# (see DB_REFERENCE.md's MorningBatch section for the exact block).
+# RECIPIENTS: RECIPIENT_PEOPLE_IDS below are resolved via
+# attendance-dashboard/CM_AttendanceEmailRecipientLookup.sql; see BACKLOG.md
+# for resolution history. Sara Comer's TouchPoint record has a personal
+# Gmail address on file, not an rpcstaff.org address like the rest of the
+# list -- confirmed correct-person via name match, not confirmed intentional.
 #
 # DEPLOYMENT: Admin > Advanced > Special Content > Python Scripts
 # File name should be: CM_AttendanceDashboardEmail
@@ -217,6 +208,8 @@ FROM dbo.Organizations o
 LEFT JOIN dbo.Meetings m
     ON m.OrganizationId = o.OrganizationId
    AND CAST(m.MeetingDate AS DATE) BETWEEN @WindowStart AND @ReportDate
+   AND ISNULL(m.Canceled, 0) = 0
+   AND ISNULL(m.DidNotMeet, 0) = 0
 WHERE o.OrganizationStatusId = @ActiveStatusId
   AND o.OrganizationName LIKE 'CM:%'
   AND (o.OrganizationName LIKE @CCPrefix + '%' OR o.OrganizationName LIKE @PSPrefix + '%')
@@ -252,6 +245,8 @@ WHERE o.OrganizationStatusId = @ActiveStatusId
           WHERE sm.OrganizationId = o.OrganizationId
             AND CAST(sm.MeetingDate AS DATE) >= DATEADD(DAY, -@ScheduleLookbackDays, CAST(GETDATE() AS DATE))
             AND DATEPART(dw, sm.MeetingDate) = 1
+            AND ISNULL(sm.Canceled, 0) = 0
+            AND ISNULL(sm.DidNotMeet, 0) = 0
       )
       -- 3587 and 3508 are "Scheduler" orgs, not classroom/attendance orgs
       -- with a fixed recurring slot; bypass the two checks above for these
@@ -570,10 +565,10 @@ missing_orgs.sort(key=lambda item: (item[0], item[1]))
 def summary_card(label, value, comparison):
     return """
     <tr><td valign="top" style="padding:6px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f1f5f9;border-radius:8px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f3f8fb;border-radius:8px;">
         <tr>
-          <td style="padding:14px 12px;font-family:Arial,sans-serif;font-size:16px;line-height:22px;font-weight:bold;color:#334155;">{label}<div style="padding-top:2px;font-size:12px;line-height:18px;font-weight:normal;color:#64748b;">{comparison}</div></td>
-          <td align="right" width="90" style="padding:14px 12px;font-family:Arial,sans-serif;font-size:30px;line-height:34px;font-weight:bold;color:#12355b;">{value}</td>
+          <td style="padding:14px 12px;font-family:Arial,sans-serif;font-size:16px;line-height:22px;font-weight:bold;color:#55606b;">{label}<div style="padding-top:2px;font-size:12px;line-height:18px;font-weight:normal;color:#6b7683;">{comparison}</div></td>
+          <td align="right" width="90" style="padding:14px 12px;font-family:Arial,sans-serif;font-size:30px;line-height:34px;font-weight:bold;color:#0c2340;">{value}</td>
         </tr>
       </table>
     </td></tr>
@@ -584,8 +579,8 @@ def column_header_row():
     return """
     <tr>
       <td style="padding:0 12px;"></td>
-      <td align="right" style="padding:0 12px;font-family:Arial,sans-serif;font-size:10px;line-height:16px;font-weight:bold;color:#94a3b8;text-transform:uppercase;letter-spacing:.3px;">This Sun</td>
-      <td align="right" width="66" style="padding:0 12px;font-family:Arial,sans-serif;font-size:10px;line-height:16px;font-weight:bold;color:#94a3b8;text-transform:uppercase;letter-spacing:.3px;">6-wk avg</td>
+      <td align="right" style="padding:0 12px;font-family:Arial,sans-serif;font-size:10px;line-height:16px;font-weight:bold;color:#8a949e;text-transform:uppercase;letter-spacing:.3px;">This Sun</td>
+      <td align="right" width="66" style="padding:0 12px;font-family:Arial,sans-serif;font-size:10px;line-height:16px;font-weight:bold;color:#8a949e;text-transform:uppercase;letter-spacing:.3px;">6-wk avg</td>
     </tr>
     """
 
@@ -595,9 +590,9 @@ def detail_row_html_raw(label_html, value, avg):
     label is built from more than one escaped field, e.g. campus + org name."""
     return """
     <tr>
-      <td style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#334155;">{label}</td>
-      <td align="right" style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0f172a;">{value}</td>
-      <td align="right" width="66" style="padding:9px 12px;border-bottom:1px solid #e2e8f0;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#94a3b8;">{avg}</td>
+      <td style="padding:9px 12px;border-bottom:1px solid #e3e8ee;font-family:Arial,sans-serif;font-size:15px;line-height:20px;color:#55606b;">{label}</td>
+      <td align="right" style="padding:9px 12px;border-bottom:1px solid #e3e8ee;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#222;">{value}</td>
+      <td align="right" width="66" style="padding:9px 12px;border-bottom:1px solid #e3e8ee;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#8a949e;">{avg}</td>
     </tr>
     """.format(label=label_html, value=value, avg=avg)
 
@@ -609,9 +604,9 @@ def detail_row_html(label, value, avg):
 def total_row_html(label, value, avg):
     return """
     <tr>
-      <td style="padding:10px 12px;background:#e8f1fb;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#12355b;">{label} total</td>
-      <td align="right" style="padding:10px 12px;background:#e8f1fb;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#12355b;">{value}</td>
-      <td align="right" width="66" style="padding:10px 12px;background:#e8f1fb;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#4a6b8a;">{avg}</td>
+      <td style="padding:10px 12px;background:#dceefa;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0c2340;">{label} total</td>
+      <td align="right" style="padding:10px 12px;background:#dceefa;font-family:Arial,sans-serif;font-size:15px;line-height:20px;font-weight:bold;color:#0c2340;">{value}</td>
+      <td align="right" width="66" style="padding:10px 12px;background:#dceefa;font-family:Arial,sans-serif;font-size:13px;line-height:20px;color:#4580b9;">{avg}</td>
     </tr>
     """.format(label=escape_html(label), value=value, avg=avg)
 
@@ -659,22 +654,22 @@ def campus_section(campus):
     <tr><td style="padding:24px 18px 8px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
         <tr>
-          <td style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">{campus}</td>
-          <td align="right" style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#12355b;">{kids}</td>
+          <td style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#0c2340;">{campus}</td>
+          <td align="right" style="font-family:Arial,sans-serif;font-size:22px;line-height:28px;font-weight:bold;color:#0c2340;">{kids}</td>
         </tr>
-        <tr><td colspan="2" style="padding-top:3px;font-family:Arial,sans-serif;font-size:14px;line-height:21px;color:#475569;">{kids} kids &middot; {delta_and_avg}</td></tr>
+        <tr><td colspan="2" style="padding-top:3px;font-family:Arial,sans-serif;font-size:14px;line-height:21px;color:#55606b;">{kids} kids &middot; {delta_and_avg}</td></tr>
       </table>
     </td></tr>
     <tr><td style="padding:0 18px 8px;">
-      <div style="padding:8px 12px;background:#dbeafe;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#12355b;">Preschool</div>
+      <div style="padding:8px 12px;background:#dceefa;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#0c2340;">Preschool</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{preschool_rows}</table>
     </td></tr>
     <tr><td style="padding:8px 18px;">
-      <div style="padding:8px 12px;background:#dbeafe;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#12355b;">Elementary</div>
+      <div style="padding:8px 12px;background:#dceefa;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#0c2340;">Elementary</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{elementary_rows}</table>
     </td></tr>
     <tr><td style="padding:8px 18px;">
-      <div style="padding:8px 12px;background:#dbeafe;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#12355b;">Special Needs</div>
+      <div style="padding:8px 12px;background:#dceefa;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#0c2340;">Special Needs</div>
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">{special_needs_rows}</table>
     </td></tr>
     """.format(
@@ -733,8 +728,8 @@ if missing_orgs:
     )
     missing_warning = """
     <tr><td style="padding:18px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff7ed;border:1px solid #fdba74;border-radius:8px;">
-        <tr><td style="padding:14px 16px;font-family:Arial,sans-serif;font-size:15px;line-height:22px;color:#7c2d12;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#fff8e1;border:1px solid #FFD242;border-radius:8px;">
+        <tr><td style="padding:14px 16px;font-family:Arial,sans-serif;font-size:15px;line-height:22px;color:#6b5600;">
           <strong>Attendance may be incomplete.</strong><br>
           No meeting was reported for {count} active Sunday attendance {group_word}:
           <ul style="margin:8px 0 0;padding-left:20px;">{items}</ul>
@@ -744,14 +739,14 @@ if missing_orgs:
     """.format(count=len(missing_orgs), group_word="group" if len(missing_orgs) == 1 else "groups", items=missing_items)
 
 body = """
-<div style="margin:0;padding:0;background:#eef2f7;">
+<div style="margin:0;padding:0;background:#f3f8fb;">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">{kids} kids &middot; {leaders} volunteers &middot; Sunday attendance summary</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#eef2f7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;background:#f3f8fb;">
     <tr><td align="center" style="padding:16px 8px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;max-width:640px;background:#ffffff;border-radius:10px;overflow:hidden;">
-        <tr><td style="padding:22px 18px;background:#12355b;font-family:Arial,sans-serif;color:#ffffff;">
+        <tr><td style="padding:22px 18px;background:#0c2340;font-family:Arial,sans-serif;color:#ffffff;">
           <div style="font-size:24px;line-height:30px;font-weight:bold;">Children's Ministry Attendance</div>
-          <div style="padding-top:4px;font-size:15px;line-height:22px;color:#dbeafe;">{date_label}</div>
+          <div style="padding-top:4px;font-size:15px;line-height:22px;color:#dceefa;">{date_label}</div>
         </td></tr>
         <tr><td style="padding:12px;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -763,14 +758,14 @@ body = """
         {missing_warning}
         {campus_sections}
         <tr><td style="padding:8px 18px 18px;">
-          <div style="padding:8px 12px;background:#fef3c7;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#78350f;">Volunteer Attendance</div>
+          <div style="padding:8px 12px;background:#fff7d6;border-bottom:2px solid #FFD242;font-family:Arial,sans-serif;font-size:14px;line-height:20px;font-weight:bold;color:#0c2340;">Volunteer Attendance</div>
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
             {leader_rows}
           </table>
         </td></tr>
         <tr><td align="center" style="padding:20px 18px 26px;">
-          <a href="{dashboard_url}" style="display:inline-block;padding:13px 20px;background:#2563eb;border-radius:6px;font-family:Arial,sans-serif;font-size:16px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;">View interactive attendance report</a>
-          <div style="padding-top:16px;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#64748b;">Automated Monday report from RockPointe TouchPoint</div>
+          <a href="{dashboard_url}" style="display:inline-block;padding:13px 20px;background:#1d6a94;border-radius:6px;font-family:Arial,sans-serif;font-size:16px;line-height:20px;font-weight:bold;color:#ffffff;text-decoration:none;">View interactive attendance report</a>
+          <div style="padding-top:16px;font-family:Arial,sans-serif;font-size:12px;line-height:18px;color:#6b7683;">Automated Monday report from RockPointe TouchPoint</div>
         </td></tr>
       </table>
     </td></tr>
