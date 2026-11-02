@@ -79,3 +79,79 @@ WHERE m.OrganizationId = @OrgId
   AND tsm.MeetingDateTime >= @StartDate
   AND tsm.MeetingDateTime < @EndDateExclusive
 ORDER BY tsm.MeetingDateTime, TeamOrSlot, p.Name;
+
+-- 4. "Someone signed up but the report shows the slot open" diagnostics.
+--    Added 2026-11-02 for Dawn's new MOC + welcome desk involvement (4176),
+--    where November sign-ups weren't showing. Query 3 only reads people from
+--    TimeSlotMeetingTeamSubGroupVolunteers (team/subgroup assignments), with
+--    IsActive/IsDeleted filters. Each query below checks one way a real
+--    sign-up could fall outside that. Run all three for the same window;
+--    whichever returns rows is the cause. Not yet run live.
+DECLARE @DiagOrgId INT = 4176
+DECLARE @DiagStart DATE = '2026-11-08'          -- week Dawn screenshotted
+DECLARE @DiagEndExclusive DATE = '2026-11-15'
+
+-- 4a. Sign-ups recorded on the time slot itself (TimeSlotMeetingVolunteers)
+--     with no matching active team/subgroup assignment. Query 3 never shows
+--     these people. If this has rows, the report needs to read this table too.
+SELECT tsm.MeetingDateTime AS ShiftStart, tsmv.TimeSlotMeetingVolunteerId,
+       tsmv.PeopleId, p.Name, tsmv.VolunteerOption
+FROM TimeSlotMeetingVolunteers tsmv
+JOIN TimeSlotMeetings tsm ON tsm.TimeSlotMeetingId = tsmv.TimeSlotMeetingId
+JOIN Meetings m ON m.MeetingId = tsm.MeetingId
+LEFT JOIN People p ON p.PeopleId = tsmv.PeopleId
+WHERE m.OrganizationId = @DiagOrgId
+  AND tsm.MeetingDateTime >= @DiagStart
+  AND tsm.MeetingDateTime < @DiagEndExclusive
+  AND NOT EXISTS (
+      SELECT 1
+      FROM TimeSlotMeetingTeams t
+      JOIN TimeSlotMeetingTeamSubGroupVolunteers v
+        ON v.TimeSlotMeetingTeamId = t.TimeSlotMeetingTeamId
+        OR v.TimeSlotMeetingTeamSubGroupId IN (
+            SELECT sg.TimeSlotMeetingTeamSubGroupId
+            FROM TimeSlotMeetingTeamSubGroups sg
+            WHERE sg.TimeSlotMeetingTeamId = t.TimeSlotMeetingTeamId)
+      WHERE t.TimeSlotMeetingId = tsmv.TimeSlotMeetingId
+        AND v.PeopleId = tsmv.PeopleId
+        AND v.IsActive <> 0)
+ORDER BY tsm.MeetingDateTime, p.Name;
+
+-- 4b. Time slots with no team rows at all. Query 3 starts FROM
+--     TimeSlotMeetingTeams, so these slots vanish from the report entirely
+--     (the "slot not showing" half of Dawn's note).
+SELECT tsm.TimeSlotMeetingId, tsm.MeetingDateTime AS ShiftStart,
+       (SELECT COUNT(*) FROM TimeSlotMeetingVolunteers x
+        WHERE x.TimeSlotMeetingId = tsm.TimeSlotMeetingId) AS DirectVolunteerRows
+FROM TimeSlotMeetings tsm
+JOIN Meetings m ON m.MeetingId = tsm.MeetingId
+WHERE m.OrganizationId = @DiagOrgId
+  AND tsm.MeetingDateTime >= @DiagStart
+  AND tsm.MeetingDateTime < @DiagEndExclusive
+  AND NOT EXISTS (SELECT 1 FROM TimeSlotMeetingTeams t
+                  WHERE t.TimeSlotMeetingId = tsm.TimeSlotMeetingId)
+ORDER BY tsm.MeetingDateTime;
+
+-- 4c. Full unfiltered team/subgroup/volunteer shape for the week: no
+--     IsActive or IsDeleted filters, so inactive assignments and deleted
+--     subgroups show up (look for IsActive = 0 or IsDeleted = 1 rows on a
+--     slot Dawn says is filled). Also shows how team/subgroup names are
+--     set up on the new involvement (e.g. "MOC" vs "Welcome Desk" with no
+--     time in the name, which the Board would merge per day).
+SELECT tsm.MeetingDateTime AS ShiftStart, tsmt.TimeSlotMeetingTeamId, tsmt.TeamName,
+       tssg.TimeSlotMeetingTeamSubGroupId, tssg.IsDeleted AS SubGroupDeleted,
+       mt.Name AS SubGroupName, v.PeopleId, p.Name, v.IsActive
+FROM TimeSlotMeetingTeams tsmt
+JOIN TimeSlotMeetings tsm ON tsm.TimeSlotMeetingId = tsmt.TimeSlotMeetingId
+JOIN Meetings m ON m.MeetingId = tsm.MeetingId
+LEFT JOIN TimeSlotMeetingTeamSubGroups tssg
+    ON tssg.TimeSlotMeetingTeamId = tsmt.TimeSlotMeetingTeamId
+LEFT JOIN MemberTags mt ON mt.Id = tssg.MemberTagId
+LEFT JOIN TimeSlotMeetingTeamSubGroupVolunteers v
+    ON v.TimeSlotMeetingTeamId = tsmt.TimeSlotMeetingTeamId
+    OR v.TimeSlotMeetingTeamSubGroupId = tssg.TimeSlotMeetingTeamSubGroupId
+LEFT JOIN People p ON p.PeopleId = v.PeopleId
+WHERE m.OrganizationId = @DiagOrgId
+  AND tsm.MeetingDateTime >= @DiagStart
+  AND tsm.MeetingDateTime < @DiagEndExclusive
+ORDER BY tsm.MeetingDateTime, tsmt.TeamName, SubGroupName, p.Name;

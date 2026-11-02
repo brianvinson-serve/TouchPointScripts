@@ -25,8 +25,9 @@ Two views of the same data, switched with the tabs at the top of the page:
   after the fact.
 
 This folder also has `WidgetTodaysCoveragePython.py` -- a small, separate
-script, hardcoded to both Staff on Campus orgs (`CC` 3951, `PS` 3726),
-showing just today's shifts side by side with no controls (no OrgId
+script, hardcoded to Dawn's MOC + welcome desk sign-up involvement
+(`OrgId 4176`, since 2026-11-02; previously the two Staff on Campus orgs,
+`CC` 3951 and `PS` 3726), showing just today's shifts with no controls (no OrgId
 picker, no date range). It's the "quick glance" companion to the Board
 above, not a replacement -- each org block links out to that org's full
 Board for more detail. Named `WidgetXxxPython` rather than this folder's
@@ -177,6 +178,14 @@ bookmarked URL.
   at runtime.
 
 ## Known limitations
+
+- Campus grouping (both the Board and the widget) is inferred from the
+  start of each shift's team name, via the `CAMPUSES` list at the top of
+  each script -- the Scheduler tables have no campus field. Added
+  2026-11-02 when 4176 put both campuses in one involvement. A shift whose
+  name doesn't start with a listed campus (e.g. a welcome desk shift named
+  just "Welcome Desk") goes in an "Other" group; add a prefix to
+  `CAMPUSES` in **both** files if that happens.
 
 - The `OrgId` dropdown lists any *active* involvement with at least one
   `TimeSlotMeetings` row -- confirmed live to include both real Scheduler

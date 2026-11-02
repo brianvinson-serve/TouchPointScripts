@@ -8,11 +8,14 @@ already deployed in TouchPoint), rather than this repo's usual RPC_ prefix,
 since this one is meant to sit alongside those as an actual widget rather
 than a standalone report page.
 
-A compact, hardcoded "who's covering today" widget for RockPointe's two
-Staff on Campus Scheduler involvements:
+A compact, hardcoded "who's covering today" widget for RockPointe's MOC /
+welcome desk Scheduler involvement:
 
-    AD: CC Staff on Campus 2026   OrgId 3951
-    AD: PS Staff on Campus 2026   OrgId 3726
+    MOC + welcome desk sign-ups   OrgId 4176   (since 2026-11-02)
+
+Previously pointed at the two per-campus Staff on Campus orgs
+(AD: CC Staff on Campus 2026 = 3951, AD: PS Staff on Campus 2026 = 3726),
+which Dawn retired in favor of 4176 starting November 2026.
 
 Companion to `RPC_SchedulerHistoryReport.py` (the full week-grid Coverage
 Board) in this same folder -- this widget is the narrow, single-purpose
@@ -47,9 +50,9 @@ Admin > Advanced > Special Content > Python Scripts > + New
 
 ## Known limitation
 
-The two OrgIds are hardcoded (`WIDGET_ORGS` below) per this request --
-intentional, not an oversight. If a third Staff on Campus involvement (or
-a different campus) is added later, add it to `WIDGET_ORGS` here; this
+The OrgIds are hardcoded (`WIDGET_ORG_IDS` below) per this request --
+intentional, not an oversight. If another Scheduler involvement is added
+later, add it to `WIDGET_ORG_IDS` here; this
 widget was not built to discover Scheduler orgs automatically the way the
 full report's dropdown does.
 """
@@ -58,11 +61,20 @@ import re
 from collections import Counter
 from datetime import datetime, timedelta
 
-# Name, OrgId -- confirmed live 2026-09-24 via sql_reference.sql query 2.
-WIDGET_ORGS = [
-    ("AD: CC Staff on Campus 2026", 3951),
-    ("AD: PS Staff on Campus 2026", 3726),
+# OrgIds shown, in order. Display name is read live via
+# model.GetOrganization() so it tracks renames.
+# 2026-11-02: swapped from the two per-campus orgs (CC 3951, PS 3726) to
+# Dawn's new combined MOC + welcome desk sign-up involvement, per her note
+# that November sign-ups now live there.
+WIDGET_ORG_IDS = [4176]
+
+# Copied from RPC_SchedulerHistoryReport.py -- see CAMPUSES there for why.
+# Each campus gets its own box; order here is display order.
+CAMPUSES = [
+    ("Central", ("central", "cc")),
+    ("Parker Square", ("parker square", "ps")),
 ]
+OTHER_CAMPUS = "Other"
 
 # ============================================================
 # RPC brand styling (main RockPointe Church palette)
@@ -86,7 +98,10 @@ CSS = """
        letter-spacing: 0.02em; color: %(navy)s; margin: 0 0 4px;
        border-bottom: 3px solid %(yellow)s; padding-bottom: 6px; }
   .tc-meta { color: #55606b; font-size: 13px; margin: 8px 0 20px; }
-  .tc-orgs { display: flex; flex-wrap: wrap; gap: 18px; }
+  .tc-orgname { font-family: %(subtitle)s; font-size: 12px; font-weight: 700; color: %(navy)s;
+          text-transform: uppercase; letter-spacing: 0.03em; margin: 0 0 8px; }
+  .tc-orgname a { color: %(navy)s; text-decoration: none; border-bottom: 1px dotted %(navy)s; }
+  .tc-orgs { margin-bottom: 18px; display: flex; flex-wrap: wrap; gap: 18px; }
   .tc-org { flex: 1 1 320px; min-width: 280px; border: 1px solid %(gray)s; border-radius: 6px;
           overflow: hidden; }
   .tc-org h2 { font-family: %(subtitle)s; font-size: 14px; font-weight: 700; color: #fff;
@@ -227,10 +242,22 @@ def normalize_team_label(name):
 
 
 def canonical_team_key(name):
-    """See RPC_SchedulerHistoryReport.py -- case-and-whitespace-blind
-    grouping key, confirmed necessary live on both hardcoded orgs here
-    (PS: whitespace variants, CC: case variants of the same shift name)."""
-    return normalize_team_label(name).lower()
+    """See RPC_SchedulerHistoryReport.py -- grouping key blind to case,
+    whitespace, dash-vs-space, and "9am" vs "9a"."""
+    key = normalize_team_label(name).lower().replace("-", " ")
+    key = re.sub(r"(\d)\s*([ap])m\b", r"\1\2", key)
+    return re.sub(r"\s+", " ", key).strip()
+
+
+def campus_of(name):
+    """See RPC_SchedulerHistoryReport.py -- (sort index, campus name) from
+    the team name's prefix."""
+    label = canonical_team_key(name)
+    for idx, (campus, prefixes) in enumerate(CAMPUSES):
+        for prefix in prefixes:
+            if label == prefix or label.startswith(prefix + " ") or label.startswith(prefix + "-"):
+                return idx, campus
+    return len(CAMPUSES), OTHER_CAMPUS
 
 
 def format_shift_time(dt):
@@ -263,31 +290,46 @@ def fetch_today_shifts(org_id, today_str, tomorrow_str):
 
 def render_org_block(org_name, org_id, today_str, tomorrow_str):
     shifts = fetch_today_shifts(org_id, today_str, tomorrow_str)
-    board_link = "RPC_SchedulerHistoryReport?OrgId={0}&StartDate={1}&EndDate={1}&View=Board".format(
+    # Absolute path: the widget renders on pages outside /PyScript/ (e.g. the
+    # home page), where a relative link resolved to /RPC_... and 404'd.
+    board_link = "/PyScript/RPC_SchedulerHistoryReport?OrgId={0}&StartDate={1}&EndDate={1}&View=Board".format(
         org_id, today_str
     )
-    print('<div class="tc-org">')
-    print('<h2><a href="{0}">{1}</a></h2>'.format(board_link, org_name))
+    print('<div class="tc-orgname"><a href="{0}">{1}</a></div>'.format(board_link, org_name))
+    print('<div class="tc-orgs">')
     if not shifts:
-        print('<div class="tc-empty">No shifts scheduled today.</div>')
+        print('<div class="tc-org"><div class="tc-empty">No shifts scheduled today.</div></div>')
         print("</div>")
         return
-    for key in sorted(shifts, key=lambda k: shifts[k]["first_start"]):
-        entry = shifts[key]
-        label = entry["label_votes"].most_common(1)[0][0]
-        time_str = format_shift_time(entry["first_start"])
-        if entry["names"]:
-            print(
-                '<div class="tc-shift"><span class="tc-shift-label">{0} &middot; {1}</span>'
-                '<span class="tc-shift-name">{2}</span></div>'.format(
-                    time_str, label, "; ".join(entry["names"])
+
+    # One box per campus. Explicit (time, label) sort inside each box --
+    # IronPython 2.7's dict order is arbitrary, so sorting on time alone
+    # left same-time shifts in a random order.
+    for key in shifts:
+        shifts[key]["label"] = shifts[key]["label_votes"].most_common(1)[0][0]
+    by_campus = {}
+    for key, entry in shifts.items():
+        by_campus.setdefault(campus_of(entry["label"]), []).append(entry)
+
+    for campus_idx, campus in sorted(by_campus):
+        print('<div class="tc-org">')
+        print("<h2>{0}</h2>".format(campus))
+        for entry in sorted(by_campus[(campus_idx, campus)],
+                            key=lambda e: (e["first_start"], e["label"])):
+            time_str = format_shift_time(entry["first_start"])
+            if entry["names"]:
+                print(
+                    '<div class="tc-shift"><span class="tc-shift-label">{0} &middot; {1}</span>'
+                    '<span class="tc-shift-name">{2}</span></div>'.format(
+                        time_str, entry["label"], "; ".join(entry["names"])
+                    )
                 )
-            )
-        else:
-            print(
-                '<div class="tc-shift tc-gap"><span class="tc-shift-label">{0} &middot; {1}</span>'
-                '<span class="tc-shift-name">Unfilled</span></div>'.format(time_str, label)
-            )
+            else:
+                print(
+                    '<div class="tc-shift tc-gap"><span class="tc-shift-label">{0} &middot; {1}</span>'
+                    '<span class="tc-shift-name">Unfilled</span></div>'.format(time_str, entry["label"])
+                )
+        print("</div>")
     print("</div>")
 
 
@@ -303,10 +345,10 @@ def main():
     print("<h1>Today's Coverage</h1>")
     print('<div class="tc-meta">{0}</div>'.format(today.strftime("%A, %B ") + str(today.day)))
 
-    print('<div class="tc-orgs">')
-    for org_name, org_id in WIDGET_ORGS:
+    for org_id in WIDGET_ORG_IDS:
+        org = model.GetOrganization(org_id)
+        org_name = org.name if org else "Involvement {0}".format(org_id)
         render_org_block(org_name, org_id, today_str, tomorrow_str)
-    print("</div>")
 
     print(
         '<div class="tc-legend">'

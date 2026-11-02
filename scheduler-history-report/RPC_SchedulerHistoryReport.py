@@ -133,6 +133,21 @@ BODY_FONT = '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Ari
 # collision risk. Every rule here is prefixed with this wrapper id.
 ROOT_ID = "rpcSchedulerHistory"
 
+# Campus is not its own field in the Scheduler tables -- it only shows up as
+# the start of each shift's team name. Board rows are grouped by matching
+# that prefix (case-blind, after normalize_team_label). Needed since
+# 2026-11-02, when Dawn's combined involvement (4176) put both campuses'
+# shifts in one org ("Central 9am-noon", "Parker Square-noon-3p"); before
+# that each campus had its own org. The "cc"/"ps" aliases match the older
+# per-campus orgs' names ("CC MOC noon-3p", "PS MOC 9a-noon"). Anything
+# that matches no prefix lands in an "Other" group rather than disappearing.
+# Order here is display order.
+CAMPUSES = [
+    ("Central", ("central", "cc")),
+    ("Parker Square", ("parker square", "ps")),
+]
+OTHER_CAMPUS = "Other"
+
 CSS = """
   *, *::before, *::after { box-sizing: border-box; }
   body { font-family: %(body)s; margin: 20px; color: #222; background: #fff; }
@@ -179,6 +194,9 @@ CSS = """
   table.sh-board th.sh-rowhead { width: 150px; text-align: left; padding: 8px 10px;
           background: #eef2f6; color: %(navy)s; font-family: %(subtitle)s;
           font-size: 12px; font-weight: 700; }
+  table.sh-board th.sh-campusrow { text-align: left; padding: 7px 10px; background: %(space)s;
+          color: #fff; font-family: %(subtitle)s; font-size: 12px; font-weight: 700;
+          text-transform: uppercase; letter-spacing: 0.06em; border-left: 4px solid %(yellow)s; }
   table.sh-board th.sh-colhead { text-align: center; padding: 8px 4px; background: %(navy)s;
           color: #fff; font-family: %(subtitle)s; font-size: 12px; }
   table.sh-board th.sh-colhead .sh-daynum { font-family: %(title)s; font-size: 18px;
@@ -384,8 +402,28 @@ def canonical_team_key(name):
     negative the board's whole design depends on NOT showing. Display text
     still comes from normalize_team_label() (via the most-common raw
     spelling, see render_board) so a display label is never invented --
-    only which rows count as "the same shift" is case-blind."""
-    return normalize_team_label(name).lower()
+    only which rows count as "the same shift" is case-blind.
+
+    Widened 2026-11-02 after 4176 (Dawn's combined involvement) showed
+    "Central 9A-noon" vs "Central 9am-noon" and "Parker Square noon-3p" vs
+    "Parker Square-noon-3p" as separate rows: the key now also treats a
+    dash like a space and "9am"/"9a" (any digit + a/p, with or without "m")
+    as the same."""
+    key = normalize_team_label(name).lower().replace("-", " ")
+    key = re.sub(r"(\d)\s*([ap])m\b", r"\1\2", key)
+    return re.sub(r"\s+", " ", key).strip()
+
+
+def campus_of(name):
+    """(sort index, campus name) for a shift's team name -- see CAMPUSES.
+    Prefix must be followed by a space, a dash, or the end of the name, so
+    "ps" doesn't swallow some unrelated "Psalms ..." team."""
+    label = canonical_team_key(name)
+    for idx, (campus, prefixes) in enumerate(CAMPUSES):
+        for prefix in prefixes:
+            if label == prefix or label.startswith(prefix + " ") or label.startswith(prefix + "-"):
+                return idx, campus
+    return len(CAMPUSES), OTHER_CAMPUS
 
 
 def escape_html(value):
@@ -566,7 +604,25 @@ def render_board(shifts, order, today):
         team_key = canonical_team_key(team)
         label_votes.setdefault(team_key, Counter())[normalize_team_label(team)] += 1
     display_label = {k: v.most_common(1)[0][0] for k, v in label_votes.items()}
-    team_keys = sorted(display_label, key=lambda k: display_label[k])
+
+    # Rows ordered campus first, then by the shift's earliest start time of
+    # day, then by label -- a fully explicit key, since IronPython 2.7's dict
+    # order is arbitrary and ties otherwise come out in a random order.
+    earliest = {}
+    for shift_start, team in order:
+        t = shift_start.time() if hasattr(shift_start, "time") else None
+        team_key = canonical_team_key(team)
+        if t is not None and (team_key not in earliest or t < earliest[team_key]):
+            earliest[team_key] = t
+    campus = {k: campus_of(display_label[k]) for k in display_label}
+    team_keys = sorted(
+        display_label,
+        key=lambda k: (campus[k][0], earliest.get(k), display_label[k]),
+    )
+    # Skip campus header rows when nothing matched a known campus (some
+    # unrelated Scheduler org picked from the dropdown) -- a lone "Other"
+    # header would just be noise.
+    show_campus_rows = any(campus[k][1] != OTHER_CAMPUS for k in team_keys)
 
     # cell[(team_key, date)] = list of display names, or None if not scheduled that day
     cell = {}
@@ -588,7 +644,15 @@ def render_board(shifts, order, today):
         )
     print("</tr>")
 
+    current_campus = None
     for team_key in team_keys:
+        if show_campus_rows and campus[team_key][1] != current_campus:
+            current_campus = campus[team_key][1]
+            print(
+                '<tr><th class="sh-campusrow" colspan="{0}">{1}</th></tr>'.format(
+                    len(dates) + 1, current_campus
+                )
+            )
         print('<tr><th class="sh-rowhead">{0}</th>'.format(display_label[team_key]))
         for d in dates:
             key = (team_key, d)
