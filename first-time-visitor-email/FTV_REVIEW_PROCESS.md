@@ -23,6 +23,7 @@ The FTV report pulls new-visitor connect cards, Children's/Student Ministry new-
 ## Status
 
 - **Fixed, confirmed live 2026-09-25 and 2026-09-28:** prayer request duplicates, couple duplicate rows (widened 2026-09-28 after the first pass missed cases where each spouse's task has different wording), connect-card/student-ministry overlap
+- **Promoted to the weekly script 2026-11-02:** until then, these fixes ran only in the preview-only `FirstTimeVisitorEmail_test` script, and the email that went out each week still came from the original code. That's most likely why Brenda still had to delete a husband/wife duplicate from the 2026-10-26 email. The student in Connect Cards that week had an FTV-keyword task, so that's the "existing person shows up in Connect Cards only" row above, working as intended.
 - **Needs live investigation:** volunteer-vs-new-kid filter, registration-vs-attendance, missing-DOB effect on pulling students, missing list numbering in the browser view
 - **Not fixable in the script:** missing address/gender/DOB/parent info — that's a check-in data-entry gap
 
