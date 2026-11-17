@@ -18,3 +18,6 @@ attendance-dashboard/SM_AttendanceEmailRecipientLookup.sql
 attendance-dashboard/SM_AttendanceMeetingDiagnostic.py
 data-dictionary-expander/local/render_rpc_staff_directory.py
 data-dictionary-expander/sql/focused/RPC_StaffDirectory.sql
+
+# Live query output with member names/prayer text -- never commit
+first-time-visitor-email/*.xlsx

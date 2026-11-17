@@ -19,28 +19,36 @@ Subject = 'FTVs for {:MMM d, yyyy}'.format(model.SundayForDate(model.DateTime))
 # Flower Mound...") showed the two tasks' Description text differs per
 # person, so that key missed them. Collapse to one row per FamilyId instead
 # -- keep the earliest task, regardless of wording.
+#
+# Reverted 2026-11-17 at Brenda's request: collapsing to one row per family
+# kept whichever spouse's task happened to be entered first (often the wife),
+# and when a connect card also carried a prayer request, that earlier task
+# could crowd out the task holding the actual FTV notes. Back to one row per
+# FTV task -- both spouses print, and staff delete one by hand if needed.
+# Primary adult (PositionInFamilyId 10) sorts first within each family.
+#
+# Confirmed live 2026-11-17 (RPC_FTVPrayerOverlapCheck): when a connect card
+# has a prayer request, staff enter it as its own task tagged BOTH FTV (35)
+# and Prayer Feed (30), with text like 'PR: ...', usually before the per-spouse
+# FTV-notes tasks. Those prayer tasks already print under Prayer Requests, so
+# exclude anything tagged 30/32 here to keep them out of Connect Cards.
 ccsql = '''
-;with ranked as (
-    select
-        tn.TaskNoteId,
-        tn.AboutPersonId,
-        a.FamilyId,
-        a.Name,
-        sp.PreferredName Spouse,
-        tn.Instructions Description,
-        row_number() over (partition by a.FamilyId order by tn.TaskNoteId) rn
-    from dbo.TaskNote tn    -- 32 Anonymous Prayer Request;  35 First Time Visitor
-        join dbo.People a on a.PeopleId = tn.AboutPersonId
-        left join dbo.People sp on sp.PeopleId = a.SpouseId
-    where tn.CreatedDate > dateadd(dd, -5, getdate())
-        and exists (select null from dbo.TaskNoteKeyword where TaskNoteId = tn.TaskNoteId and KeywordId = 35)
-        and tn.IsNote = 0
-        and a.CampusId = {0}
-)
-select TaskNoteId, AboutPersonId, FamilyId, Name, Spouse, Description
-from ranked
-where rn = 1
-order by FamilyId, AboutPersonId, TaskNoteId
+select
+    tn.TaskNoteId,
+    tn.AboutPersonId,
+    a.FamilyId,
+    a.Name,
+    sp.PreferredName Spouse,
+    tn.Instructions Description
+from dbo.TaskNote tn    -- 32 Anonymous Prayer Request;  35 First Time Visitor
+    join dbo.People a on a.PeopleId = tn.AboutPersonId
+    left join dbo.People sp on sp.PeopleId = a.SpouseId
+where tn.CreatedDate > dateadd(dd, -5, getdate())
+    and exists (select null from dbo.TaskNoteKeyword where TaskNoteId = tn.TaskNoteId and KeywordId = 35)
+    and not exists (select null from dbo.TaskNoteKeyword where TaskNoteId = tn.TaskNoteId and KeywordId in (30, 32))
+    and tn.IsNote = 0
+    and a.CampusId = {0}
+order by a.FamilyId, a.PositionInFamilyId, tn.TaskNoteId
 '''
 
 # Fixed 2026-09-24: the original version of this query UNIONed a keyword-32
